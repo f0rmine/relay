@@ -64,8 +64,14 @@ export const useMessagesStore = defineStore('messages', {
     read(conversationId: string) {
       useSocketStore().send('message:read', { conversation_id: conversationId });
     },
-    delete(messageId: string) {
-      useSocketStore().send('message:delete', { message_id: messageId });
+    async delete(messageId: string) {
+      const socket = useSocketStore();
+      if (socket.canSendRealtime()) {
+        socket.send('message:delete', { message_id: messageId });
+        return;
+      }
+      const message = await apiFetch<Message>(`/messages/${messageId}`, { method: 'DELETE' });
+      this.markDeleted(message);
     },
     upsert(message: Message) {
       const list = this.byConversation[message.conversation_id] || [];
