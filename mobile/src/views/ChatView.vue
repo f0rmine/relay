@@ -8,9 +8,11 @@
       <ChatWindow
         :messages="messages.byConversation[conversationId] || []"
         :current-user-id="auth.user?.id"
+        :participants="conversation?.participants || []"
         :typing="isPeerTyping"
         :has-more="messages.hasMore[conversationId]"
         @older="messages.fetch(conversationId, true)"
+        @delete-message="deleteMessage"
       />
     </ion-content>
     <MessageInput :sending="sending" @send="send" @typing="typing" />
@@ -81,6 +83,15 @@ async function send(text: string, file: File | null) {
 
 function typing(active: boolean) {
   socket.send(active ? 'typing:start' : 'typing:stop', { conversation_id: conversationId });
+}
+
+async function deleteMessage(messageId: string) {
+  error.value = '';
+  try {
+    await messages.delete(messageId);
+  } catch (err: unknown) {
+    error.value = displayError(err, 'Message delete failed');
+  }
 }
 </script>
 

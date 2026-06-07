@@ -6,6 +6,8 @@
       :key="message.id"
       :message="message"
       :own="message.sender_id === currentUserId"
+      :sender-name="senderName(message.sender_id)"
+      @delete="$emit('delete-message', message.id)"
     />
     <TypingIndicator :visible="typing" />
   </div>
@@ -14,15 +16,26 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { IonButton } from '@ionic/vue';
-import type { Message } from '@/api/types';
+import type { Message, User } from '@/api/types';
 import MessageBubble from './MessageBubble.vue';
 import TypingIndicator from './TypingIndicator.vue';
 
-const props = defineProps<{ messages: Message[]; currentUserId?: string; typing: boolean; hasMore?: boolean }>();
-const emit = defineEmits<{ older: [] }>();
+const props = defineProps<{
+  messages: Message[];
+  currentUserId?: string;
+  participants?: User[];
+  typing: boolean;
+  hasMore?: boolean;
+}>();
+const emit = defineEmits<{ older: []; 'delete-message': [messageId: string] }>();
 const scroller = ref<HTMLElement | null>(null);
 const preservingOlderScroll = ref(false);
 let previousScrollHeight = 0;
+
+function senderName(senderId: string) {
+  if (senderId === props.currentUserId) return 'You';
+  return props.participants?.find((user) => user.id === senderId)?.display_name || 'User';
+}
 
 function scrollBottom() {
   nextTick(() => {
