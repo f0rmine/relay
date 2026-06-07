@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+relay_backend.egg-info/
+uploads/
+test-uploads/
+alembic/versions/__pycache__/
+firebase-service-account.json
+*service-account*.json
