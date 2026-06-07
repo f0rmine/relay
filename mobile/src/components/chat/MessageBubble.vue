@@ -29,6 +29,7 @@
       :is-open="actionsOpen"
       header="Message"
       :buttons="actionButtons"
+      css-class="relay-message-actions"
       @didDismiss="actionsOpen = false"
     />
   </div>
@@ -104,15 +105,17 @@ function cancelPress() {
   opacity: 0.7;
 }
 .bubble.deleted {
-  background: rgba(39, 54, 68, 0.72);
-  color: var(--relay-muted);
+  background: rgba(78, 96, 116, 0.82);
+  color: #ffffff;
 }
 p {
   margin: 0;
   line-height: 1.32;
 }
 em {
-  color: var(--relay-muted);
+  color: #ffffff;
+  font-style: normal;
+  font-weight: 500;
 }
 .deleted-state {
   display: flex;
@@ -126,10 +129,26 @@ em {
   height: 18px;
   place-items: center;
   border-radius: 999px;
-  background: rgba(143, 163, 181, 0.18);
-  color: #a9bbcb;
+  background: rgba(244, 248, 251, 0.18);
+  color: #ffffff;
   font-size: 16px;
   line-height: 1;
+}
+:global(.relay-message-actions) {
+  --background: #17212b;
+  --color: #ffffff;
+  --button-color: #ffffff;
+  --button-background: #17212b;
+  --button-background-hover: #223246;
+  --button-background-activated: #223246;
+}
+:global(.relay-message-actions .action-sheet-title),
+:global(.relay-message-actions .action-sheet-button),
+:global(.relay-message-actions .action-sheet-button-inner) {
+  color: #ffffff !important;
+}
+:global(.relay-message-actions .action-sheet-destructive) {
+  color: #ffffff !important;
 }
 .time {
   margin-top: 4px;
