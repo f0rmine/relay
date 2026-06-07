@@ -1,0 +1,90 @@
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import type { Message } from '@/api/types';
+import { openConversation } from '@/services/navigation';
+
+const MESSAGE_CHANNEL_ID = 'messages';
+
+let initialized = false;
+let permissionGranted = false;
+
+async function ensurePermission(): Promise<boolean> {
+  if (permissionGranted) return true;
+  if (!Capacitor.isNativePlatform()) return false;
+
+  let status = await LocalNotifications.checkPermissions();
+  if (status.display !== 'granted') {
+    status = await LocalNotifications.requestPermissions();
+  }
+  permissionGranted = status.display === 'granted';
+  return permissionGranted;
+}
+
+export async function initNotifications(): Promise<void> {
+  if (initialized || !Capacitor.isNativePlatform()) return;
+  initialized = true;
+
+  await ensurePermission();
+  await LocalNotifications.createChannel({
+    id: MESSAGE_CHANNEL_ID,
+    name: 'Messages',
+    description: 'New chat message notifications',
+    importance: 4,
+    visibility: 1,
+    vibration: true
+  }).catch(() => undefined);
+
+  await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+    const conversationId = event.notification.extra?.conversationId;
+    if (conversationId) openConversation(conversationId);
+  });
+}
+
+function notificationId(messageId: string): number {
+  let hash = 0;
+  for (let index = 0; index < messageId.length; index += 1) {
+    hash = (hash * 31 + messageId.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) || Date.now() % 2147483647;
+}
+
+function messagePreview(message: Message): string {
+  if (message.deleted_at) return 'Message deleted';
+  if (message.text?.trim()) return message.text.trim();
+  const attachment = message.attachments?.[0];
+  if (attachment?.mime_type.startsWith('image/')) return 'Image';
+  return attachment ? 'Attachment' : 'Message';
+}
+
+export async function notifyNewMessage(message: Message, senderName: string): Promise<void> {
+  if (!(await ensurePermission())) return;
+
+  await LocalNotifications.schedule({
+    notifications: [
+      {
+        id: notificationId(message.id),
+        title: senderName,
+        body: messagePreview(message),
+        channelId: MESSAGE_CHANNEL_ID,
+        group: `conversation:${message.conversation_id}`,
+        extra: {
+          conversationId: message.conversation_id,
+          messageId: message.id
+        }
+      }
+    ]
+  });
+}
+
+export async function clearLocalConversationNotifications(conversationId: string): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+
+  const delivered = await LocalNotifications.getDeliveredNotifications().catch(() => ({ notifications: [] }));
+  const notifications = delivered.notifications.filter((notification) => {
+    const dataConversationId = notification.data?.conversationId || notification.extra?.conversationId;
+    return notification.group === `conversation:${conversationId}` || dataConversationId === conversationId;
+  });
+  if (notifications.length) {
+    await LocalNotifications.removeDeliveredNotifications({ notifications }).catch(() => undefined);
+  }
+}
