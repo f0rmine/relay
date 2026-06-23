@@ -4,6 +4,9 @@
       <ion-toolbar>
         <ion-buttons slot="start"><ion-back-button default-href="/conversations" text="" /></ion-buttons>
         <ion-title>{{ t('profile.title') }}</ion-title>
+        <ion-buttons slot="end">
+          <LanguageSelector icon-only />
+        </ion-buttons>
       </ion-toolbar>
     </ion-header>
     <ion-content class="page-content">
@@ -22,7 +25,6 @@
         <ion-item>
           <ion-input v-model="email" :label="t('common.email')" label-placement="stacked" type="email" />
         </ion-item>
-        <ion-item><LanguageSelector /></ion-item>
       </ion-list>
       <ion-button expand="block" class="action" :disabled="saving" @click="save">{{ t('profile.save') }}</ion-button>
       <ion-button expand="block" fill="clear" color="danger" @click="logout">{{ t('profile.logout') }}</ion-button>

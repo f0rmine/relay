@@ -32,10 +32,10 @@ class DummyUser:
 
 
 DUMMY_USERS = [
-    DummyUser("alice", "alice@example.com", "Alice"),
-    DummyUser("bob", "bob@example.com", "Bob"),
-    DummyUser("charlie", "charlie@example.com", "Charlie"),
-    DummyUser("dana", "dana@example.com", "Dana"),
+    DummyUser("olena", "olena@example.com", "Олена"),
+    DummyUser("taras", "taras@example.com", "Тарас"),
+    DummyUser("oksana", "oksana@example.com", "Оксана"),
+    DummyUser("mykola", "mykola@example.com", "Микола"),
 ]
 
 
@@ -192,28 +192,28 @@ async def main() -> None:
             )
             conversation_reader.setdefault(conversation_id, sender_user.username)
 
-    alice = accounts["alice"]
-    bob = accounts["bob"]
+    olena = accounts["olena"]
+    taras = accounts["taras"]
     attachment_conversation = request_json(
         "/conversations",
         "POST",
-        {"participant_id": bob["user"]["id"]},
-        alice["access_token"],
+        {"participant_id": taras["user"]["id"]},
+        olena["access_token"],
     )
-    attachment = upload_png(alice["access_token"], attachment_conversation["id"])
+    attachment = upload_png(olena["access_token"], attachment_conversation["id"])
     attachment_message_text = "Smoke image attachment"
     attachment_message = await send_and_wait(
-        alice,
+        olena,
         attachment_conversation["id"],
         attachment_message_text,
         [attachment["id"]],
     )
-    downloaded = request_bytes(f"/attachments/{attachment['id']}/download", bob["access_token"])
+    downloaded = request_bytes(f"/attachments/{attachment['id']}/download", taras["access_token"])
     if downloaded != SMOKE_PNG:
         raise RuntimeError("downloaded attachment bytes did not match uploaded bytes")
     attachment_history = request_json(
         f"/conversations/{attachment_conversation['id']}/messages?limit=20",
-        token=bob["access_token"],
+        token=taras["access_token"],
     )
     attachment_history_message = next(
         (

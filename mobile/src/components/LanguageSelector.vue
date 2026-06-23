@@ -1,8 +1,8 @@
 <template>
   <div class="language-selector-wrapper">
-    <ion-button id="lang-trigger" fill="clear" color="medium" class="language-btn">
-      <ion-icon :icon="globeOutline" slot="start"></ion-icon>
-      <span class="lang-text">{{ currentLangName }}</span>
+    <ion-button id="lang-trigger" fill="clear" class="language-btn">
+      <ion-icon :icon="globeOutline" :slot="iconOnly ? 'icon-only' : 'start'"></ion-icon>
+      <span v-if="!iconOnly" class="lang-text">{{ currentLangName }}</span>
     </ion-button>
 
     <ion-popover trigger="lang-trigger" trigger-action="click" alignment="center">
@@ -30,6 +30,8 @@ import {
 import { globeOutline, checkmark } from 'ionicons/icons';
 import { useI18n } from 'vue-i18n';
 import { isSupportedLocale, setLocale } from '@/i18n';
+
+defineProps<{ iconOnly?: boolean }>();
 
 const { locale, t } = useI18n();
 
