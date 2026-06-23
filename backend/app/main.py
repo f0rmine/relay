@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import attachments, auth, conversations, devices, messages, users
 from app.core.config import get_settings
+from app.core.encryption import get_encryption_keyring
 from app.core.errors import install_exception_handlers
 from app.core.redis import close_redis, get_redis, ping_redis
 from app.websocket.manager import manager
@@ -17,16 +18,20 @@ from app.websocket.routes import router as websocket_router
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    if settings.redis_required:
-        await ping_redis()
+    await ping_redis()
     redis = await get_redis()
     subscriber = asyncio.create_task(manager.redis_subscriber(redis))
-    yield
-    subscriber.cancel()
-    await close_redis()
+    try:
+        yield
+    finally:
+        subscriber.cancel()
+        with suppress(asyncio.CancelledError):
+            await subscriber
+        await close_redis()
 
 
 settings = get_settings()
+get_encryption_keyring()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

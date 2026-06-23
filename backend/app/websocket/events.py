@@ -1,12 +1,8 @@
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.attachment import AttachmentOut
-from app.schemas.message import MessageOut
-from app.schemas.user import UserSearchResult
-from app.services.conversations import unread_count
+from app.services.messages import plaintext_message_text
 
 
 def serialize_message(message: Message) -> dict:
@@ -31,7 +27,7 @@ def serialize_message(message: Message) -> dict:
             "id": message.id,
             "conversation_id": message.conversation_id,
             "sender_id": message.sender_id,
-            "text": message.text,
+            "text": plaintext_message_text(message),
             "created_at": message.created_at,
             "updated_at": message.updated_at,
             "edited_at": message.edited_at,

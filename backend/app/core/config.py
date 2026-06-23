@@ -2,8 +2,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from app.core.encryption import validate_key_configuration
 
 
 class Settings(BaseSettings):
@@ -11,7 +13,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "postgresql+asyncpg://relay:relay_password@localhost:5432/relay"
     redis_url: str = "redis://localhost:6379/0"
-    redis_required: bool = True
     jwt_secret: str = "dev-access-secret-at-least-32-bytes-long"
     jwt_refresh_secret: str = "dev-refresh-secret-at-least-32-bytes-long"
     access_token_expire_minutes: int = 30
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     )
     upload_dir: Path = Path("./uploads")
     max_upload_size_mb: int = 10
+    encryption_active_key_id: str = ""
+    encryption_keys: dict[str, str] = Field(default_factory=dict)
     firebase_project_id: str | None = None
     firebase_service_account_file: Path | None = None
     push_notifications_enabled: bool = False
@@ -40,6 +43,11 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def validate_encryption(self) -> "Settings":
+        validate_key_configuration(self.encryption_active_key_id, self.encryption_keys)
+        return self
 
     @property
     def max_upload_size_bytes(self) -> int:

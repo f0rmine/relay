@@ -1,12 +1,15 @@
 <template>
   <div v-if="file" class="preview">
     <span class="file-name">{{ file.name }}</span>
-    <ion-button size="small" fill="clear" @click="$emit('clear')">Remove</ion-button>
+    <ion-button size="small" fill="clear" @click="$emit('clear')">{{ t('chat.removeAttachment') }}</ion-button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { IonButton } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 defineProps<{ file: File | null }>();
 defineEmits<{ clear: [] }>();

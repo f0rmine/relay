@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia';
-import { WS_BASE_URL } from '@/config/env';
+import { webSocketUrl } from '@/config/env';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import type { Message } from '@/api/types';
 import { initNotifications, notifyNewMessage } from '@/services/notifications';
 import { activeConversationId } from '@/services/navigation';
+import { translate } from '@/i18n';
 
 interface SocketState {
   connected: boolean;
@@ -13,7 +14,11 @@ interface SocketState {
   connecting: boolean;
   authenticated: boolean;
   authRequested: boolean;
-  queue: Array<{ type: string; payload: Record<string, unknown> }>;
+  queue: Array<{ type: string; payload: Record<string, unknown>; requestId?: string }>;
+  joinedConversations: string[];
+  reconnectAttempt: number;
+  reconnectTimer: number | null;
+  manualDisconnect: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,28 +42,65 @@ export const useSocketStore = defineStore('socket', {
     connecting: false,
     authenticated: false,
     authRequested: false,
-    queue: []
+    queue: [],
+    joinedConversations: [],
+    reconnectAttempt: 0,
+    reconnectTimer: null,
+    manualDisconnect: false
   }),
   actions: {
+    clearReconnectTimer() {
+      if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    },
+    scheduleReconnect() {
+      if (this.manualDisconnect || this.reconnectTimer !== null) return;
+      const delay = Math.min(1000 * 2 ** this.reconnectAttempt, 30000);
+      this.reconnectAttempt += 1;
+      this.reconnectTimer = window.setTimeout(() => {
+        this.reconnectTimer = null;
+        void this.connect();
+      }, delay);
+    },
+    sendEnvelope(
+      socket: WebSocket,
+      type: string,
+      payload: Record<string, unknown>,
+      requestId?: string
+    ) {
+      socket.send(JSON.stringify({ type, payload, ...(requestId ? { request_id: requestId } : {}) }));
+    },
     sendAuth(socket: WebSocket, token: string) {
       if (this.authRequested || socket.readyState !== WebSocket.OPEN) return;
       this.authRequested = true;
       socket.send(JSON.stringify({ type: 'auth', payload: { token } }));
     },
-    connect() {
+    async connect() {
+      this.manualDisconnect = false;
+      this.clearReconnectTimer();
       const auth = useAuthStore();
-      auth.syncFromStorage();
-      const accessToken = auth.accessToken;
-      if (!accessToken) return;
       const existingSocket = this.socket;
       if (existingSocket?.readyState === WebSocket.OPEN) {
         if (this.authenticated) return;
-        this.sendAuth(existingSocket, accessToken);
-        return;
       }
       if (this.connecting || existingSocket?.readyState === WebSocket.CONNECTING) return;
       this.connecting = true;
-      const socket = new WebSocket(`${WS_BASE_URL}/ws`);
+      try {
+        await auth.syncFromStorage();
+      } catch {
+        this.connecting = false;
+        return;
+      }
+      const accessToken = auth.accessToken;
+      if (!accessToken) {
+        this.connecting = false;
+        return;
+      }
+      if (existingSocket?.readyState === WebSocket.OPEN) {
+        this.sendAuth(existingSocket, accessToken);
+        return;
+      }
+      const socket = new WebSocket(webSocketUrl('/ws'));
       this.socket = socket;
       socket.onopen = () => {
         if (this.socket !== socket) return;
@@ -72,6 +114,7 @@ export const useSocketStore = defineStore('socket', {
         this.connecting = false;
         this.authenticated = false;
         this.authRequested = false;
+        this.scheduleReconnect();
       };
       socket.onerror = () => {
         if (this.socket !== socket) return;
@@ -79,6 +122,7 @@ export const useSocketStore = defineStore('socket', {
         this.connecting = false;
         this.authenticated = false;
         this.authRequested = false;
+        socket.close();
       };
       socket.onmessage = (event) => {
         if (this.socket !== socket) return;
@@ -92,6 +136,8 @@ export const useSocketStore = defineStore('socket', {
       };
     },
     disconnect() {
+      this.manualDisconnect = true;
+      this.clearReconnectTimer();
       this.socket?.close();
       this.socket = null;
       this.connected = false;
@@ -99,50 +145,80 @@ export const useSocketStore = defineStore('socket', {
       this.authenticated = false;
       this.authRequested = false;
       this.queue = [];
+      this.joinedConversations = [];
+      this.reconnectAttempt = 0;
     },
     canSendRealtime(): boolean {
       return this.socket?.readyState === WebSocket.OPEN && this.authenticated;
     },
-    send(type: string, payload: Record<string, unknown>): boolean {
+    send(type: string, payload: Record<string, unknown>, requestId?: string): boolean {
       const socket = this.socket;
       if (socket?.readyState === WebSocket.OPEN && this.authenticated) {
-        socket.send(JSON.stringify({ type, payload }));
+        this.sendEnvelope(socket, type, payload, requestId);
         return true;
       }
-      this.queue.push({ type, payload });
-      this.connect();
+      this.queue.push({ type, payload, requestId });
+      void this.connect();
       return false;
     },
-    sendNow(type: string, payload: Record<string, unknown>): boolean {
+    sendNow(type: string, payload: Record<string, unknown>, requestId?: string): boolean {
       const socket = this.socket;
       if (socket?.readyState === WebSocket.OPEN && this.authenticated) {
-        socket.send(JSON.stringify({ type, payload }));
+        this.sendEnvelope(socket, type, payload, requestId);
         return true;
       }
-      this.connect();
+      void this.connect();
       return false;
     },
     flushQueue() {
       const pending = [...this.queue];
       this.queue = [];
-      pending.forEach((item) => this.send(item.type, item.payload));
+      pending.forEach((item) => this.send(item.type, item.payload, item.requestId));
     },
     join(conversationId: string) {
-      this.send('conversation:join', { conversation_id: conversationId });
+      if (!this.joinedConversations.includes(conversationId)) {
+        this.joinedConversations.push(conversationId);
+      }
+      if (this.canSendRealtime()) {
+        this.send('conversation:join', { conversation_id: conversationId });
+      } else {
+        void this.connect();
+      }
     },
     leave(conversationId: string) {
-      this.send('conversation:leave', { conversation_id: conversationId });
+      this.joinedConversations = this.joinedConversations.filter((id) => id !== conversationId);
+      if (this.canSendRealtime()) {
+        this.send('conversation:leave', { conversation_id: conversationId });
+      }
     },
     handle(type: string, payload: unknown) {
       const messages = useMessagesStore();
       const conversations = useConversationsStore();
       if (!isRecord(payload)) return;
+      if (type === 'error') {
+        const requestId = stringField(payload, 'request_id');
+        const conversationId = requestId ? messages.failPending(requestId) : undefined;
+        window.dispatchEvent(new CustomEvent('relay:socket-error', {
+          detail: {
+            conversationId,
+            message: conversationId ? translate('chat.sendFailed') : translate('api.requestFailed')
+          }
+        }));
+        return;
+      }
       if (type === 'auth:ok') {
+        const reconnected = this.reconnectAttempt > 0;
         this.connected = true;
         this.connecting = false;
         this.authenticated = true;
         this.authRequested = false;
+        this.reconnectAttempt = 0;
+        this.clearReconnectTimer();
         this.flushQueue();
+        this.joinedConversations.forEach((conversationId) => {
+          this.send('conversation:join', { conversation_id: conversationId });
+          if (reconnected) void messages.fetch(conversationId);
+        });
         return;
       }
       if (!this.authenticated) return;
@@ -163,7 +239,7 @@ export const useSocketStore = defineStore('socket', {
         if (!isOwnMessage && !isActiveConversation) {
           const conversation = conversations.items.find((item) => item.id === incoming.conversation_id);
           const sender = conversation?.participants.find((user) => user.id === incoming.sender_id);
-          void notifyNewMessage(incoming, sender?.display_name || sender?.username || 'New message');
+          void notifyNewMessage(incoming, sender?.display_name || sender?.username || translate('notifications.newMessage'));
         }
       }
       if (type === 'message:deleted') messages.markDeleted(payload as unknown as Message);

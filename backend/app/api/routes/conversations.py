@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from app.api.deps import CurrentUser, DbSession
 from app.core.redis import get_redis
 from app.schemas.conversation import ConversationCreate, ConversationDetail, ConversationOut
-from app.schemas.message import MessageHistory, MessageOut
+from app.schemas.message import MessageHistory
 from app.schemas.user import UserSearchResult
 from app.services.conversations import (
     get_or_create_private_conversation,
@@ -15,7 +15,7 @@ from app.services.conversations import (
     require_participant,
     unread_count,
 )
-from app.services.messages import list_messages
+from app.services.messages import decode_message_cursor, encode_message_cursor, list_messages
 from app.services.presence import online_map
 from app.websocket.events import serialize_message
 from app.websocket.events import conversation_participant_ids
@@ -79,15 +79,18 @@ async def get_messages(
     conversation_id: str,
     current_user: CurrentUser,
     db: DbSession,
-    cursor: datetime | None = None,
+    cursor: str | None = Query(default=None, max_length=512),
     limit: int = Query(default=30, ge=1, le=100),
 ) -> MessageHistory:
-    rows, has_more = await list_messages(db, current_user.id, conversation_id, cursor, limit)
+    decoded_cursor = decode_message_cursor(cursor) if cursor else None
+    rows, has_more = await list_messages(
+        db, current_user.id, conversation_id, decoded_cursor, limit
+    )
     items = [serialize_message(row) for row in rows]
     return MessageHistory(
         items=items,
         has_more=has_more,
-        next_cursor=rows[-1].created_at if has_more and rows else None,
+        next_cursor=encode_message_cursor(rows[-1]) if has_more and rows else None,
     )
 
 

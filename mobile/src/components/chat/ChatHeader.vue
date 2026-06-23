@@ -1,12 +1,12 @@
 <template>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-back-button default-href="/conversations" />
+      <ion-back-button default-href="/conversations" text="" />
     </ion-buttons>
     <div class="chat-title">
-      <Avatar :name="peer?.display_name || 'User'" :url="peer?.avatar_url" :size="34" />
+      <Avatar :name="peer?.display_name || t('common.user')" :url="peer?.avatar_url" :size="34" />
       <div>
-        <strong>{{ peer?.display_name || 'Chat' }}</strong>
+        <strong>{{ peer?.display_name || t('common.chat') }}</strong>
         <OnlineStatusBadge :online="peer?.is_online" :last-seen="peer?.last_seen_at" />
       </div>
     </div>
@@ -16,10 +16,12 @@
 <script setup lang="ts">
 import { IonBackButton, IonButtons, IonToolbar } from '@ionic/vue';
 import type { User } from '@/api/types';
+import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/users/Avatar.vue';
 import OnlineStatusBadge from '@/components/users/OnlineStatusBadge.vue';
 
 defineProps<{ peer?: User }>();
+const { t } = useI18n();
 </script>
 
 <style scoped>

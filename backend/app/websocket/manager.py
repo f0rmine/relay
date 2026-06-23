@@ -79,15 +79,21 @@ class ConnectionManager:
 
     async def redis_subscriber(self, redis: Redis) -> None:
         pubsub = redis.pubsub()
-        await pubsub.subscribe("pubsub:broadcast")
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
-            data = json.loads(message["data"])
-            if data.get("origin") == self.instance_id:
-                continue
-            for user_id in data.get("user_ids", []):
-                await self.send_to_user(user_id, data["event"])
+        try:
+            await pubsub.subscribe("pubsub:broadcast")
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                try:
+                    data = json.loads(message["data"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if data.get("origin") == self.instance_id:
+                    continue
+                for user_id in data.get("user_ids", []):
+                    await self.send_to_user(user_id, data["event"])
+        finally:
+            await pubsub.aclose()
 
 
 manager = ConnectionManager()

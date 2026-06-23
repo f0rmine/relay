@@ -7,10 +7,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.encryption import (
+    DecryptionError,
+    ENCRYPTION_VERSION,
+    attachment_associated_data,
+    get_encryption_keyring,
+)
 from app.models.attachment import Attachment
 from app.models.conversation import ConversationParticipant
 from app.models.message import Message
 from app.models.user import User
+from app.services.uploads import read_upload_limited
 
 ALLOWED_MIME_TYPES = {
     "image/jpeg",
@@ -60,21 +67,23 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
     if suffix not in ALLOWED_EXTENSIONS_BY_MIME_TYPE[content_type]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File extension does not match file type")
 
-    data = await file.read()
+    data = await read_upload_limited(file, settings.max_upload_size_bytes)
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file upload")
-    if len(data) > settings.max_upload_size_bytes:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File is too large")
     if is_image(content_type) and sniff_image_type(data) != content_type:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image content does not match file type")
 
     attachment_id = str(uuid4())
-    stored_filename = f"{uuid4()}{suffix}"
+    encrypted_data = get_encryption_keyring().encrypt(
+        data,
+        associated_data=attachment_associated_data(attachment_id),
+    )
+    stored_filename = f"{uuid4()}.enc"
     upload_dir = settings.upload_dir / "attachments"
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / stored_filename
     async with aiofiles.open(path, "wb") as out:
-        await out.write(data)
+        await out.write(encrypted_data.ciphertext)
 
     attachment = Attachment(
         id=attachment_id,
@@ -84,12 +93,42 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
         mime_type=content_type,
         file_size=len(data),
         storage_path=str(path),
+        encrypted_path=str(path),
         public_url=f"/attachments/{attachment_id}/download",
+        encryption_nonce=encrypted_data.nonce,
+        encryption_key_id=encrypted_data.key_id,
+        encryption_version=encrypted_data.version,
     )
     db.add(attachment)
     await db.commit()
     await db.refresh(attachment)
     return attachment
+
+
+async def read_attachment_bytes(attachment: Attachment) -> bytes:
+    path = Path(attachment.encrypted_path or attachment.storage_path)
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
+    async with aiofiles.open(path, "rb") as stored_file:
+        stored_data = await stored_file.read()
+    encryption_metadata = (
+        attachment.encryption_nonce,
+        attachment.encryption_key_id,
+        attachment.encryption_version,
+        attachment.encrypted_path,
+    )
+    if all(value is None for value in encryption_metadata):
+        return stored_data
+    if any(value is None for value in encryption_metadata):
+        raise DecryptionError("Encrypted attachment metadata is incomplete")
+    if attachment.encryption_version != ENCRYPTION_VERSION:
+        raise DecryptionError("Unsupported attachment encryption version")
+    return get_encryption_keyring().decrypt(
+        stored_data,
+        attachment.encryption_nonce,
+        attachment.encryption_key_id,
+        associated_data=attachment_associated_data(attachment.id),
+    )
 
 
 async def require_attachment_access(

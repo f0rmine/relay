@@ -1,9 +1,18 @@
 import { defineStore } from 'pinia';
-import { apiFetch } from '@/api/client';
+import { ApiError, apiFetch } from '@/api/client';
 import type { TokenResponse, User } from '@/api/types';
-import { API_BASE_URL } from '@/config/env';
+import { apiUrl } from '@/config/env';
+import { useConversationsStore } from '@/stores/conversations';
+import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
 import { initPushNotifications, unregisterPushNotifications } from '@/services/push';
+import {
+  clearAuthTokens,
+  getAuthTokens,
+  getStoredAuthUser,
+  setAuthTokens,
+  setStoredAuthUser
+} from '@/services/auth-storage';
 
 interface AuthState {
   user: User | null;
@@ -14,24 +23,13 @@ interface AuthState {
   tokenListenerReady: boolean;
 }
 
-function storedUser(): User | null {
-  const raw = localStorage.getItem('authUser');
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as User;
-  } catch {
-    localStorage.removeItem('authUser');
-    return null;
-  }
-}
-
 let restorePromise: Promise<void> | null = null;
 
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
-    user: storedUser(),
-    accessToken: localStorage.getItem('accessToken'),
-    refreshToken: localStorage.getItem('refreshToken'),
+    user: null,
+    accessToken: null,
+    refreshToken: null,
     loading: false,
     restored: false,
     tokenListenerReady: false
@@ -40,23 +38,30 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: (state) => Boolean(state.accessToken)
   },
   actions: {
-    persist(tokens: TokenResponse) {
+    async persist(tokens: TokenResponse) {
+      try {
+        await Promise.all([
+          setAuthTokens(tokens.access_token, tokens.refresh_token),
+          setStoredAuthUser(tokens.user)
+        ]);
+      } catch (error) {
+        await Promise.allSettled([clearAuthTokens(), setStoredAuthUser(null)]);
+        throw error;
+      }
       this.accessToken = tokens.access_token;
       this.refreshToken = tokens.refresh_token;
+      this.user = tokens.user;
       this.restored = true;
-      this.setUser(tokens.user);
-      localStorage.setItem('accessToken', tokens.access_token);
-      localStorage.setItem('refreshToken', tokens.refresh_token);
     },
-    setUser(user: User | null) {
+    async setUser(user: User | null) {
       this.user = user;
-      if (user) localStorage.setItem('authUser', JSON.stringify(user));
-      else localStorage.removeItem('authUser');
+      await setStoredAuthUser(user);
     },
-    syncFromStorage() {
-      this.accessToken = localStorage.getItem('accessToken');
-      this.refreshToken = localStorage.getItem('refreshToken');
-      this.user = storedUser();
+    async syncFromStorage() {
+      const [tokens, storedUser] = await Promise.all([getAuthTokens(), getStoredAuthUser()]);
+      this.accessToken = tokens.accessToken;
+      this.refreshToken = tokens.refreshToken;
+      this.user = storedUser;
     },
     listenForTokenRefresh() {
       if (this.tokenListenerReady) return;
@@ -66,34 +71,34 @@ export const useAuthStore = defineStore('auth', {
         if (!detail?.access_token || !detail?.refresh_token) return;
         this.accessToken = detail.access_token;
         this.refreshToken = detail.refresh_token;
-        this.setUser(detail.user);
+        this.user = detail.user;
       });
       window.addEventListener('relay:auth-expired', () => {
         useSocketStore().disconnect();
-        this.clear();
+        void this.clear().catch(() => undefined);
       });
     },
     async restore() {
       this.listenForTokenRefresh();
       if (this.restored) return;
       if (restorePromise) return restorePromise;
-      this.syncFromStorage();
-      if (!this.accessToken) {
-        this.restored = true;
-        return;
-      }
       restorePromise = (async () => {
         try {
-          this.setUser(await apiFetch<User>('/auth/me'));
-          useSocketStore().connect();
+          await this.syncFromStorage();
+          if (!this.accessToken) return;
+          await this.setUser(await apiFetch<User>('/auth/me'));
+          void useSocketStore().connect();
           void initPushNotifications();
-        } catch {
-          this.clear();
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401) {
+            await this.clear();
+          }
         } finally {
           this.restored = true;
-          restorePromise = null;
         }
-      })();
+      })().finally(() => {
+        restorePromise = null;
+      });
       return restorePromise;
     },
     async login(login: string, password: string) {
@@ -103,8 +108,8 @@ export const useAuthStore = defineStore('auth', {
           method: 'POST',
           body: JSON.stringify({ login, password })
         });
-        this.persist(response);
-        useSocketStore().connect();
+        await this.persist(response);
+        void useSocketStore().connect();
         void initPushNotifications();
       } finally {
         this.loading = false;
@@ -117,8 +122,8 @@ export const useAuthStore = defineStore('auth', {
           method: 'POST',
           body: JSON.stringify({ username, display_name, email, password })
         });
-        this.persist(response);
-        useSocketStore().connect();
+        await this.persist(response);
+        void useSocketStore().connect();
         void initPushNotifications();
       } finally {
         this.loading = false;
@@ -127,13 +132,13 @@ export const useAuthStore = defineStore('auth', {
     async refresh(): Promise<boolean> {
       if (!this.refreshToken) return false;
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        const response = await fetch(apiUrl('/auth/refresh'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refresh_token: this.refreshToken })
         });
         if (!response.ok) return false;
-        this.persist(await response.json());
+        await this.persist(await response.json());
         return true;
       } catch {
         return false;
@@ -150,15 +155,16 @@ export const useAuthStore = defineStore('auth', {
       }
       await unregisterPushNotifications();
       useSocketStore().disconnect();
-      this.clear();
+      await this.clear();
     },
-    clear() {
-      this.setUser(null);
+    async clear() {
+      this.user = null;
       this.accessToken = null;
       this.refreshToken = null;
       this.restored = true;
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
+      await Promise.all([clearAuthTokens(), setStoredAuthUser(null)]);
+      useConversationsStore().reset();
+      useMessagesStore().reset();
     }
   }
 });

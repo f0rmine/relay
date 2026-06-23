@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-relay}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_password}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +19,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -34,7 +34,6 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://relay:relay_password@postgres:5432/relay}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      REDIS_REQUIRED: ${REDIS_REQUIRED:-true}
       JWT_SECRET: ${JWT_SECRET:-change-me-access-secret-at-least-32-bytes-long}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-secret-at-least-32-bytes-long}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
@@ -42,6 +41,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:5173,http://localhost:8100,https://localhost,http://10.0.2.2:8000,capacitor://localhost,ionic://localhost}
       UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
+      ENCRYPTION_ACTIVE_KEY_ID: ${ENCRYPTION_ACTIVE_KEY_ID:-}
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-{}}
       PUSH_NOTIFICATIONS_ENABLED: ${PUSH_NOTIFICATIONS_ENABLED:-false}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_SERVICE_ACCOUNT_FILE: ${FIREBASE_SERVICE_ACCOUNT_FILE:-}

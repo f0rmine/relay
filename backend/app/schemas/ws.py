@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class WebSocketEnvelope(BaseModel):
     type: str
     payload: dict[str, Any] = Field(default_factory=dict)
+    request_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AuthPayload(BaseModel):

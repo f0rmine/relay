@@ -2,11 +2,11 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
-        <ion-buttons slot="start"><ion-back-button default-href="/conversations" /></ion-buttons>
-        <ion-title>Search users</ion-title>
+        <ion-buttons slot="start"><ion-back-button default-href="/conversations" text="" /></ion-buttons>
+        <ion-title>{{ t('search.title') }}</ion-title>
       </ion-toolbar>
       <ion-toolbar>
-        <ion-searchbar v-model="query" :debounce="300" placeholder="Username, display name, email" @ionInput="search" />
+        <ion-searchbar v-model="query" :debounce="300" :placeholder="t('search.placeholder')" @ionInput="search" />
       </ion-toolbar>
     </ion-header>
     <ion-content class="page-content">
@@ -14,7 +14,7 @@
       <ion-list v-if="results.length">
         <UserSearchResult v-for="user in results" :key="user.id" :user="user" @select="startChat" />
       </ion-list>
-      <EmptyState v-else title="Find people" text="Registered users appear here." />
+      <EmptyState v-else :title="t('search.emptyTitle')" :text="t('search.emptyText')" />
     </ion-content>
   </ion-page>
 </template>
@@ -23,6 +23,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { IonBackButton, IonButtons, IonContent, IonHeader, IonList, IonPage, IonSearchbar, IonTitle, IonToolbar } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import { apiFetch, displayError } from '@/api/client';
 import type { User } from '@/api/types';
 import EmptyState from '@/components/EmptyState.vue';
@@ -35,17 +36,22 @@ const results = ref<User[]>([]);
 const error = ref('');
 const router = useRouter();
 const conversations = useConversationsStore();
+const { t } = useI18n();
+let searchSequence = 0;
 
 async function search() {
+  const sequence = ++searchSequence;
+  const value = query.value.trim();
   error.value = '';
-  if (!query.value.trim()) {
+  if (!value) {
     results.value = [];
     return;
   }
   try {
-    results.value = await apiFetch<User[]>(`/users/search?q=${encodeURIComponent(query.value)}`);
+    const response = await apiFetch<User[]>(`/users/search?q=${encodeURIComponent(value)}`);
+    if (sequence === searchSequence) results.value = response;
   } catch (err: unknown) {
-    error.value = displayError(err, 'Search failed');
+    if (sequence === searchSequence) error.value = displayError(err, t('search.failed'));
   }
 }
 
@@ -55,7 +61,13 @@ async function startChat(user: User) {
     const conversation = await conversations.start(user.id);
     router.replace(`/chat/${conversation.id}`);
   } catch (err: unknown) {
-    error.value = displayError(err, 'Could not start chat');
+    error.value = displayError(err, t('search.startFailed'));
   }
 }
 </script>
+
+<style scoped>
+ion-searchbar {
+  --color: #ffffff;
+}
+</style>

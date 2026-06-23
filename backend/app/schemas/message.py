@@ -36,7 +36,7 @@ class MessageOut(OrmModel):
 
 class MessageHistory(BaseModel):
     items: list[MessageOut]
-    next_cursor: datetime | None = None
+    next_cursor: str | None = None
     has_more: bool = False
 
 

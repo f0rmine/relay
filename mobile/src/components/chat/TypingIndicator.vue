@@ -1,9 +1,12 @@
 <template>
-  <div v-if="visible" class="typing">typing...</div>
+  <div v-if="visible" class="typing">{{ t('chat.typing') }}</div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
+
 defineProps<{ visible: boolean }>();
+const { t } = useI18n();
 </script>
 
 <style scoped>

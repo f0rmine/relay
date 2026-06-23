@@ -7,8 +7,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.attachment import Attachment
 from app.models.user import User
+from app.services.uploads import read_upload_limited
 
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 ALLOWED_AVATAR_EXTENSIONS = {
@@ -44,7 +44,9 @@ async def search_users(db: AsyncSession, q: str, current_user_id: str, limit: in
 async def save_avatar(db: AsyncSession, user: User, file: UploadFile) -> User:
     settings = get_settings()
     suffix = Path(file.filename or "").suffix.lower()
-    data = await file.read()
+    data = await read_upload_limited(
+        file, settings.max_upload_size_bytes, too_large_detail="Avatar is too large"
+    )
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty avatar upload")
     if file.content_type not in ALLOWED_AVATAR_TYPES:
@@ -64,8 +66,6 @@ async def save_avatar(db: AsyncSession, user: User, file: UploadFile) -> User:
 
     if sniffed_type != file.content_type:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Avatar content does not match file type")
-    if len(data) > settings.max_upload_size_bytes:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Avatar is too large")
 
     stored_filename = f"{uuid4()}{suffix}"
     avatar_dir = settings.upload_dir / "avatars"
