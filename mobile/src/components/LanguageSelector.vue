@@ -1,11 +1,11 @@
 <template>
   <div class="language-selector-wrapper">
-    <ion-button id="lang-trigger" fill="clear" class="language-btn">
+    <ion-button :id="triggerId" fill="clear" class="language-btn">
       <ion-icon :icon="globeOutline" :slot="iconOnly ? 'icon-only' : 'start'"></ion-icon>
       <span v-if="!iconOnly" class="lang-text">{{ currentLangName }}</span>
     </ion-button>
 
-    <ion-popover trigger="lang-trigger" trigger-action="click" alignment="center">
+    <ion-popover :trigger="triggerId" trigger-action="click" alignment="center">
       <ion-content>
         <ion-list lines="none" class="lang-list">
           <ion-item button :color="locale === 'en' ? 'light' : ''" @click="selectLocale('en')">
@@ -32,6 +32,8 @@ import { useI18n } from 'vue-i18n';
 import { isSupportedLocale, setLocale } from '@/i18n';
 
 defineProps<{ iconOnly?: boolean }>();
+
+const triggerId = `lang-trigger-${Math.random().toString(36).substring(2, 9)}`;
 
 const { locale, t } = useI18n();
 

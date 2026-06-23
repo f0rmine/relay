@@ -1,8 +1,14 @@
 <template>
   <ion-page>
+    <ion-header class="ion-no-border">
+      <ion-toolbar style="--background: transparent;">
+        <ion-buttons slot="end">
+          <LanguageSelector />
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
     <ion-content class="page-content">
       <div class="content-wrap auth-card">
-        <LanguageSelector />
         <h1>{{ t('auth.register.title') }}</h1>
         <p class="muted">{{ t('auth.register.subtitle') }}</p>
         <ErrorState v-if="error" :message="error" />
@@ -16,7 +22,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { IonButton, IonContent, IonPage } from '@ionic/vue';
+import { IonButton, IonContent, IonPage, IonHeader, IonToolbar, IonButtons } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import RegisterForm from '@/components/auth/RegisterForm.vue';
 import LanguageSelector from '@/components/LanguageSelector.vue';
