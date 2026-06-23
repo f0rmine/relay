@@ -25,3 +25,6 @@ firebase-service-account.json
 *service-account*.json
 **/google-services.json
 mobile/android/app/google-services.json
+
+# Temporary scripts
+backend/app/scripts_delete_dummy.py
