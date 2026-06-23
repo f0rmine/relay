@@ -2,29 +2,30 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
-        <ion-buttons slot="start"><ion-back-button default-href="/conversations" /></ion-buttons>
-        <ion-title>Profile</ion-title>
+        <ion-buttons slot="start"><ion-back-button default-href="/conversations" text="" /></ion-buttons>
+        <ion-title>{{ t('profile.title') }}</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content class="page-content">
       <div class="profile content-wrap">
-        <Avatar :name="auth.user?.display_name || 'Me'" :url="auth.user?.avatar_url" :size="96" />
+        <Avatar :name="auth.user?.display_name || t('common.me')" :url="auth.user?.avatar_url" :size="96" />
         <h2>{{ auth.user?.display_name }}</h2>
         <p class="muted">@{{ auth.user?.username }}</p>
         <input ref="avatarInput" type="file" accept="image/*" hidden @change="uploadAvatar" />
-        <ion-button fill="outline" :disabled="saving" @click="avatarInput?.click()">Change avatar</ion-button>
+        <ion-button fill="outline" :disabled="saving" @click="avatarInput?.click()">{{ t('profile.changeAvatar') }}</ion-button>
       </div>
       <ErrorState v-if="error" :message="error" />
       <ion-list class="profile-list">
         <ion-item>
-          <ion-input v-model="displayName" label="Display name" label-placement="stacked" />
+          <ion-input v-model="displayName" :label="t('common.displayName')" label-placement="stacked" />
         </ion-item>
         <ion-item>
-          <ion-input v-model="email" label="Email" label-placement="stacked" type="email" />
+          <ion-input v-model="email" :label="t('common.email')" label-placement="stacked" type="email" />
         </ion-item>
+        <ion-item><LanguageSelector /></ion-item>
       </ion-list>
-      <ion-button expand="block" class="action" :disabled="saving" @click="save">Save</ion-button>
-      <ion-button expand="block" fill="clear" color="danger" @click="logout">Log out</ion-button>
+      <ion-button expand="block" class="action" :disabled="saving" @click="save">{{ t('profile.save') }}</ion-button>
+      <ion-button expand="block" fill="clear" color="danger" @click="logout">{{ t('profile.logout') }}</ion-button>
     </ion-content>
   </ion-page>
 </template>
@@ -33,10 +34,12 @@
 import { ref, watchEffect } from 'vue';
 import { useRouter } from 'vue-router';
 import { IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem, IonList, IonPage, IonTitle, IonToolbar } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import { apiFetch, displayError } from '@/api/client';
 import type { User } from '@/api/types';
 import ErrorState from '@/components/ErrorState.vue';
 import Avatar from '@/components/users/Avatar.vue';
+import LanguageSelector from '@/components/LanguageSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
@@ -47,6 +50,7 @@ const avatarInput = ref<HTMLInputElement | null>(null);
 const saving = ref(false);
 const error = ref('');
 const allowedAvatarTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const { t } = useI18n();
 
 watchEffect(() => {
   displayName.value = auth.user?.display_name || '';
@@ -57,12 +61,12 @@ async function save() {
   saving.value = true;
   error.value = '';
   try {
-    auth.setUser(await apiFetch<User>('/users/me/profile', {
+    await auth.setUser(await apiFetch<User>('/users/me/profile', {
       method: 'PATCH',
       body: JSON.stringify({ display_name: displayName.value, email: email.value })
     }));
   } catch (err: unknown) {
-    error.value = displayError(err, 'Profile update failed');
+    error.value = displayError(err, t('profile.updateFailed'));
   } finally {
     saving.value = false;
   }
@@ -72,7 +76,7 @@ async function uploadAvatar(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
   if (!allowedAvatarTypes.has(file.type)) {
-    error.value = 'Avatar upload failed: choose a JPG, PNG, WebP, or GIF image.';
+    error.value = t('profile.avatarTypeFailed');
     if (avatarInput.value) avatarInput.value.value = '';
     return;
   }
@@ -81,9 +85,9 @@ async function uploadAvatar(event: Event) {
   const form = new FormData();
   form.append('file', file);
   try {
-    auth.setUser(await apiFetch<User>('/users/me/avatar', { method: 'POST', body: form }));
+    await auth.setUser(await apiFetch<User>('/users/me/avatar', { method: 'POST', body: form }));
   } catch (err: unknown) {
-    error.value = `Avatar upload failed: ${displayError(err, 'unknown error')}`;
+    error.value = t('profile.avatarUploadFailed', { error: displayError(err, t('profile.unknownError')) });
   } finally {
     saving.value = false;
     if (avatarInput.value) avatarInput.value.value = '';

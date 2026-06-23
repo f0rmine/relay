@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -46,8 +47,11 @@ async def participant_ids_for_user(db: AsyncSession, user_id: str) -> list[str]:
     return list(ids)
 
 
-async def send_error(websocket: WebSocket, message: str) -> None:
-    await websocket.send_json({"type": "error", "payload": {"detail": message}})
+async def send_error(websocket: WebSocket, message: str, request_id: str | None = None) -> None:
+    payload = {"detail": message}
+    if request_id:
+        payload["request_id"] = request_id
+    await websocket.send_json({"type": "error", "payload": payload})
 
 
 async def authenticate_websocket(db: AsyncSession, websocket: WebSocket) -> User:
@@ -94,17 +98,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             while True:
                 try:
                     raw = await websocket.receive_json()
+                except json.JSONDecodeError:
+                    await send_error(websocket, "Invalid JSON payload")
+                    continue
                 except RuntimeError:
                     break
+                request_id: str | None = None
                 try:
                     envelope = WebSocketEnvelope.model_validate(raw)
+                    request_id = envelope.request_id
                     await handle_event(db, redis, websocket, user, envelope)
                 except ValidationError:
                     await db.rollback()
-                    await send_error(websocket, "Invalid event payload")
+                    await send_error(websocket, "Invalid event payload", request_id)
                 except Exception:
                     await db.rollback()
-                    await send_error(websocket, "Unable to process event")
+                    await send_error(websocket, "Unable to process event", request_id)
         except WebSocketDisconnect:
             pass
         finally:
@@ -169,6 +178,8 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         conversation = await require_participant(db, payload.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
         message_payload = serialize_message(message)
+        if envelope.request_id:
+            message_payload["request_id"] = envelope.request_id
         await manager.broadcast_to_users(redis, participants, "message:new", message_payload)
         await manager.broadcast_to_users(
             redis,
@@ -219,4 +230,4 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         )
         return
 
-    await send_error(websocket, "Unknown event type")
+    await send_error(websocket, "Unknown event type", envelope.request_id)

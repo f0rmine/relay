@@ -13,9 +13,10 @@ import './theme/variables.css';
 import App from './App.vue';
 import router from './router';
 import { useAuthStore } from './stores/auth';
+import { i18n, translate } from './i18n';
 
 const pinia = createPinia();
-const app = createApp(App).use(pinia).use(IonicVue).use(router);
+const app = createApp(App).use(pinia).use(i18n).use(IonicVue).use(router);
 
 useAuthStore(pinia).listenForTokenRefresh();
 
@@ -45,7 +46,7 @@ CapacitorApp.addListener('backButton', async ({ canGoBack }) => {
     }
     lastMainBackPressAt = now;
     const toast = await toastController.create({
-      message: 'Press again to exit',
+      message: translate('app.pressAgainToExit'),
       duration: 1500,
       position: 'bottom'
     });

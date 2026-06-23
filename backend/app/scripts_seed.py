@@ -6,7 +6,7 @@ from app.services.auth import register_user
 
 async def main() -> None:
     async with AsyncSessionLocal() as db:
-        for username in ["alice", "bob", "carol"]:
+        for username in ["alice", "bob", "carol", "david", "eve", "frank", "george", "hannah", "ian", "julia", "kevin", "liam"]:
             try:
                 await register_user(
                     db,

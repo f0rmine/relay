@@ -1,11 +1,12 @@
-from datetime import timedelta
+import json
+from datetime import UTC, datetime, timedelta
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import httpx
 
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.tests.conftest import register
 
@@ -223,6 +224,7 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
     from app.core.database import get_db
     from app.main import app
     from app.models.attachment import Attachment
+    from app.models.message import Message
     from app.models.user import User
     from app.services.messages import create_message
 
@@ -232,8 +234,23 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
         message = await create_message(db, user, conversation_id, "hello bob", [attachment_id])
         attachment = await db.get(Attachment, attachment_id)
         stored_filename = attachment.stored_filename
+        stored_path = attachment.storage_path
+        assert message.text is None
+        assert message.text_ciphertext is not None
+        assert b"hello bob" not in message.text_ciphertext
+        assert message.text_nonce is not None
+        assert message.text_key_id == "test-v1"
+        assert message.encryption_version == 1
+        assert attachment.encryption_nonce is not None
+        assert attachment.encryption_key_id == "test-v1"
+        assert attachment.encryption_version == 1
+        assert attachment.encrypted_path == attachment.storage_path
+        assert attachment.stored_filename.endswith(".enc")
         message_id = message.id
         break
+
+    with open(stored_path, "rb") as stored_file:
+        assert stored_file.read() != b"hello"
 
     public_static_file = await client.get(f"/uploads/attachments/{stored_filename}")
     assert public_static_file.status_code == 404
@@ -242,10 +259,27 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
         f"/attachments/{attachment_id}", headers=auth_headers(bob["access_token"])
     )
     assert allowed_attachment.status_code == 200
+    allowed_download = await client.get(
+        f"/attachments/{attachment_id}/download", headers=auth_headers(bob["access_token"])
+    )
+    assert allowed_download.status_code == 200
+    assert allowed_download.content == b"hello"
     rejected_attachment = await client.get(
         f"/attachments/{attachment_id}", headers=auth_headers(charlie["access_token"])
     )
     assert rejected_attachment.status_code == 404
+
+    from app.api.routes import attachments as attachments_route
+
+    async def fail_if_decryption_is_attempted(attachment) -> bytes:
+        raise AssertionError("unauthorized attachment reached decryption")
+
+    monkeypatch.setattr(attachments_route, "read_attachment_bytes", fail_if_decryption_is_attempted)
+    rejected_download = await client.get(
+        f"/attachments/{attachment_id}/download",
+        headers=auth_headers(charlie["access_token"]),
+    )
+    assert rejected_download.status_code == 404
 
     history = await client.get(
         f"/conversations/{conversation_id}/messages", headers=auth_headers(bob["access_token"])
@@ -254,6 +288,23 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
     assert history.json()["items"][0]["text"] == "hello bob"
     assert history.json()["items"][0]["attachments"][0]["id"] == attachment_id
     assert history.json()["items"][0]["attachments"][0]["public_url"] == f"/attachments/{attachment_id}/download"
+
+    from app.websocket import events as websocket_events
+
+    def fail_if_message_decryption_is_attempted(message) -> str:
+        raise AssertionError("unauthorized message reached decryption")
+
+    with monkeypatch.context() as authorization_check:
+        authorization_check.setattr(
+            websocket_events,
+            "plaintext_message_text",
+            fail_if_message_decryption_is_attempted,
+        )
+        rejected_history = await client.get(
+            f"/conversations/{conversation_id}/messages",
+            headers=auth_headers(charlie["access_token"]),
+        )
+    assert rejected_history.status_code == 404
 
     from app.api.routes import conversations as conversations_route
     from app.api.routes import messages as messages_route
@@ -287,6 +338,15 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
     assert broadcasts[-2][2]["id"] == message_id
     assert broadcasts[-2][2]["deleted_at"] is not None
     assert broadcasts[-1][2]["latest_message"]["id"] == message_id
+
+    async for db in override():
+        deleted_message = await db.get(Message, message_id)
+        assert deleted_message.text is None
+        assert deleted_message.text_ciphertext is None
+        assert deleted_message.text_nonce is None
+        assert deleted_message.text_key_id is None
+        assert deleted_message.encryption_version is None
+        break
 
     hidden_attachment = await client.get(
         f"/attachments/{attachment_id}", headers=auth_headers(bob["access_token"])
@@ -334,6 +394,53 @@ async def test_message_history_pagination_returns_next_cursor(client: AsyncClien
     assert body["next_cursor"] is not None
 
 
+async def test_message_history_cursor_handles_equal_timestamps(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.message import Message
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        for text in ["first", "second", "third"]:
+            await create_message(db, sender, conversation_id, text, [])
+        common_time = datetime(2026, 1, 1, tzinfo=UTC)
+        await db.execute(
+            update(Message)
+            .where(Message.conversation_id == conversation_id)
+            .values(created_at=common_time)
+        )
+        await db.commit()
+        break
+
+    first_page = await client.get(
+        f"/conversations/{conversation_id}/messages?limit=2",
+        headers=auth_headers(bob["access_token"]),
+    )
+    cursor = first_page.json()["next_cursor"]
+    second_page = await client.get(
+        f"/conversations/{conversation_id}/messages?limit=2&cursor={cursor}",
+        headers=auth_headers(bob["access_token"]),
+    )
+
+    assert first_page.status_code == 200, first_page.text
+    assert second_page.status_code == 200, second_page.text
+    ids = [item["id"] for item in first_page.json()["items"] + second_page.json()["items"]]
+    assert len(ids) == 3
+    assert len(set(ids)) == 3
+
+
 async def test_file_upload_validation(client: AsyncClient) -> None:
     alice = await register(client, "alice", "alice@example.com")
     rejected = await client.post(
@@ -364,6 +471,20 @@ async def test_file_upload_validation(client: AsyncClient) -> None:
     )
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["original_filename"] == "note.txt"
+
+
+async def test_upload_reader_stops_above_limit() -> None:
+    from io import BytesIO
+
+    import pytest
+    from fastapi import HTTPException, UploadFile
+
+    from app.services.uploads import read_upload_limited
+
+    upload = UploadFile(filename="large.txt", file=BytesIO(b"12345"))
+    with pytest.raises(HTTPException) as raised:
+        await read_upload_limited(upload, max_bytes=4)
+    assert raised.value.status_code == 413
 
 
 async def test_upload_with_invalid_conversation_does_not_create_orphan_attachment(
@@ -424,7 +545,7 @@ async def test_push_token_register_and_remove(client: AsyncClient) -> None:
     registered = await client.post(
         "/devices/push-token",
         headers=auth_headers(alice["access_token"]),
-        json={"token": token, "platform": "android"},
+        json={"token": token, "platform": "android", "locale": "uk"},
     )
     assert registered.status_code == 204
 
@@ -438,6 +559,7 @@ async def test_push_token_register_and_remove(client: AsyncClient) -> None:
         assert device is not None
         assert device.user_id == alice["user"]["id"]
         assert device.enabled is True
+        assert device.locale == "uk"
         break
 
     removed = await client.request(
@@ -492,6 +614,34 @@ async def test_push_preview_and_disabled_delivery(client: AsyncClient, monkeypat
         sender = await db.get(User, alice["user"]["id"])
         message = await create_message(db, sender, conversation_id, "push text", [])
         assert push_preview(message) == "push text"
+        assert push_preview(message, "uk") == "push text"
+        image_message = SimpleNamespace(
+            deleted_at=None,
+            text_ciphertext=None,
+            text=None,
+            attachments=[SimpleNamespace(mime_type="image/png")],
+        )
+        assert push_preview(image_message, "en") == "Image"
+        assert push_preview(image_message, "uk") == "Зображення"
+        attachment_message = SimpleNamespace(
+            deleted_at=None,
+            text_ciphertext=None,
+            text=None,
+            attachments=[SimpleNamespace(mime_type="application/pdf")],
+        )
+        assert push_preview(attachment_message, "en") == "Attachment"
+        assert push_preview(attachment_message, "uk") == "Вкладення"
+        generic_message = SimpleNamespace(
+            deleted_at=None,
+            text_ciphertext=None,
+            text=None,
+            attachments=[],
+        )
+        assert push_preview(generic_message, "en") == "Message"
+        assert push_preview(generic_message, "uk") == "Повідомлення"
+        deleted_message = SimpleNamespace(deleted_at=True)
+        assert push_preview(deleted_message, "en") == "Message deleted"
+        assert push_preview(deleted_message, "uk") == "Повідомлення видалено"
         await send_message_push(db, [bob["user"]["id"]], sender, message)
         break
 
@@ -666,7 +816,10 @@ async def test_websocket_connect_sends_auth_ok_before_events(client: AsyncClient
             return None
 
         async def receive_json(self) -> dict:
-            if self._received:
+            if self._received is True:
+                self._received = "malformed"
+                raise json.JSONDecodeError("invalid", "{", 1)
+            if self._received == "malformed":
                 from fastapi import WebSocketDisconnect
 
                 raise WebSocketDisconnect(code=1000)
@@ -714,6 +867,7 @@ async def test_websocket_connect_sends_auth_ok_before_events(client: AsyncClient
 
     assert websocket.sent[0]["type"] == "auth:ok"
     assert websocket.sent[0]["payload"]["user_id"] == alice["user"]["id"]
+    assert websocket.sent[1] == {"type": "error", "payload": {"detail": "Invalid JSON payload"}}
 
 
 async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClient, monkeypatch) -> None:
@@ -746,7 +900,9 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
         broadcasts.append((user_ids, event_type, payload))
 
     async def fake_push(db, recipient_ids: list[str], sender: User, message: Message) -> None:
-        push_calls.append((recipient_ids, message.text or ""))
+        from app.services.messages import plaintext_message_text
+
+        push_calls.append((recipient_ids, plaintext_message_text(message) or ""))
 
     monkeypatch.setattr(websocket_routes.manager, "broadcast_to_users", fake_broadcast)
     monkeypatch.setattr(websocket_routes.manager, "is_connected", lambda user_id: False)
@@ -763,6 +919,7 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
             user=sender,
             envelope=WebSocketEnvelope(
                 type="message:send",
+                request_id="client-request-1",
                 payload={
                     "conversation_id": conversation_id,
                     "text": "hello over ws",
@@ -771,17 +928,16 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
             ),
         )
         persisted = (
-            await db.scalars(
-                select(Message).where(
-                    Message.conversation_id == conversation_id,
-                    Message.text == "hello over ws",
-                )
-            )
+            await db.scalars(select(Message).where(Message.conversation_id == conversation_id))
         ).first()
         break
 
     assert sent_json == []
     assert persisted is not None
+    assert persisted.text is None
+    assert b"hello over ws" not in persisted.text_ciphertext
+    assert broadcasts[0][2]["text"] == "hello over ws"
+    assert broadcasts[0][2]["request_id"] == "client-request-1"
     assert [event for _, event, _ in broadcasts] == ["message:new", "conversation:updated"]
     assert push_calls == [([bob["user"]["id"]], "hello over ws")]
 

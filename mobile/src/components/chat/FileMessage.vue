@@ -1,7 +1,7 @@
 <template>
   <button class="file" type="button" :disabled="loading" @click="openFile">
     <ion-icon :icon="documentAttachOutline" />
-    <span>{{ loading ? 'Opening...' : attachment.original_filename }}</span>
+    <span>{{ loading ? t('chat.opening') : attachment.original_filename }}</span>
   </button>
 </template>
 
@@ -9,11 +9,13 @@
 import { ref } from 'vue';
 import { IonIcon } from '@ionic/vue';
 import { documentAttachOutline } from 'ionicons/icons';
+import { useI18n } from 'vue-i18n';
 import { apiBlob } from '@/api/client';
 import type { Attachment } from '@/api/types';
 
 const props = defineProps<{ attachment: Attachment }>();
 const loading = ref(false);
+const { t } = useI18n();
 
 async function openFile() {
   if (loading.value) return;

@@ -1,12 +1,12 @@
-from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi.responses import Response
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.attachment import AttachmentOut
 from app.services.conversations import require_participant
-from app.services.attachments import require_attachment_access, save_upload
+from app.services.attachments import read_attachment_bytes, require_attachment_access, save_upload
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -31,9 +31,17 @@ async def get_attachment(attachment_id: str, current_user: CurrentUser, db: DbSe
 
 
 @router.get("/{attachment_id}/download")
-async def download_attachment(attachment_id: str, current_user: CurrentUser, db: DbSession) -> FileResponse:
+async def download_attachment(
+    attachment_id: str, current_user: CurrentUser, db: DbSession
+) -> Response:
     attachment = await require_attachment_access(db, attachment_id, current_user.id)
-    path = Path(attachment.storage_path)
-    if not path.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
-    return FileResponse(path, filename=attachment.original_filename, media_type=attachment.mime_type)
+    content = await read_attachment_bytes(attachment)
+    return Response(
+        content=content,
+        media_type=attachment.mime_type,
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(attachment.original_filename)}"
+            )
+        },
+    )

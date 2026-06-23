@@ -13,6 +13,10 @@ export const useConversationsStore = defineStore('conversations', {
     loading: false
   }),
   actions: {
+    reset() {
+      this.items = [];
+      this.loading = false;
+    },
     async fetchAll() {
       this.loading = true;
       try {

@@ -15,11 +15,26 @@ from app.core.config import get_settings
 from app.models.device import DeviceToken
 from app.models.message import Message
 from app.models.user import User
+from app.services.messages import plaintext_message_text
 
 logger = logging.getLogger(__name__)
 
 FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 FCM_CONFIG_ERROR_COOLDOWN_SECONDS = 300
+PUSH_PREVIEW_LABELS = {
+    "en": {
+        "deleted": "Message deleted",
+        "image": "Image",
+        "attachment": "Attachment",
+        "message": "Message",
+    },
+    "uk": {
+        "deleted": "Повідомлення видалено",
+        "image": "Зображення",
+        "attachment": "Вкладення",
+        "message": "Повідомлення",
+    },
+}
 
 _fcm_config_disabled_until = 0.0
 _fcm_config_lock = asyncio.Lock()
@@ -48,15 +63,19 @@ async def _access_token() -> str | None:
     return await anyio.to_thread.run_sync(_refresh_access_token)
 
 
-def push_preview(message: Message) -> str:
+def push_preview(message: Message, locale: str = "en") -> str:
+    labels = PUSH_PREVIEW_LABELS.get(locale, PUSH_PREVIEW_LABELS["en"])
     if message.deleted_at:
-        return "Message deleted"
-    if message.text and message.text.strip():
-        return message.text.strip()
+        return labels["deleted"]
+    text = plaintext_message_text(message)
+    if text and text.strip():
+        return text.strip()
     attachment = message.attachments[0] if message.attachments else None
     if attachment and attachment.mime_type.startswith("image/"):
-        return "Image"
-    return "Attachment"
+        return labels["image"]
+    if attachment:
+        return labels["attachment"]
+    return labels["message"]
 
 
 def _fcm_error_summary(response: httpx.Response) -> str:
@@ -150,13 +169,13 @@ async def send_message_push(
         f"https://fcm.googleapis.com/v1/projects/{settings.firebase_project_id}/messages:send"
     )
     title = sender.display_name or sender.username
-    body = push_preview(message)
 
     async with _fcm_config_lock:
         if _fcm_config_error_active():
             return
         async with httpx.AsyncClient(timeout=10) as client:
             for token in tokens:
+                body = push_preview(message, token.locale)
                 payload = {
                     "message": {
                         "token": token.token,

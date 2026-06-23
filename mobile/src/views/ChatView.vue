@@ -20,9 +20,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { IonContent, IonHeader, IonPage } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import { displayError } from '@/api/client';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatWindow from '@/components/chat/ChatWindow.vue';
@@ -36,53 +37,88 @@ import { clearLocalConversationNotifications } from '@/services/notifications';
 import { clearPushConversationNotifications } from '@/services/push';
 
 const route = useRoute();
-const conversationId = route.params.id as string;
+const conversationId = computed(() => String(route.params.id));
 const auth = useAuthStore();
 const conversations = useConversationsStore();
 const messages = useMessagesStore();
 const socket = useSocketStore();
 const sending = ref(false);
 const error = ref('');
+const { t } = useI18n();
 
-const conversation = computed(() => conversations.items.find((item) => item.id === conversationId));
+const conversation = computed(() => conversations.items.find((item) => item.id === conversationId.value));
 const peer = computed(() => conversation.value?.participants.find((user) => user.id !== auth.user?.id));
-const isPeerTyping = computed(() => Boolean(peer.value && messages.typing[conversationId]?.[peer.value.id]));
+const isPeerTyping = computed(() => Boolean(
+  peer.value && messages.typing[conversationId.value]?.[peer.value.id]
+));
+let loadSequence = 0;
 
-onMounted(async () => {
+async function loadConversation(id: string, previousId?: string) {
+  const sequence = ++loadSequence;
+  if (previousId) socket.leave(previousId);
+  error.value = '';
   try {
-    if (!conversation.value) await conversations.fetchAll();
-    socket.join(conversationId);
-    await messages.fetch(conversationId);
-    messages.read(conversationId);
-    conversations.markRead(conversationId);
-    void clearLocalConversationNotifications(conversationId);
-    void clearPushConversationNotifications(conversationId);
+    if (!conversations.items.some((item) => item.id === id)) await conversations.fetchAll();
+    if (sequence !== loadSequence) return;
+    socket.join(id);
+    await messages.fetch(id);
+    if (sequence !== loadSequence) return;
+    messages.read(id);
+    conversations.markRead(id);
+    void clearLocalConversationNotifications(id);
+    void clearPushConversationNotifications(id);
   } catch (err: unknown) {
-    error.value = displayError(err, 'Chat loading failed');
+    if (sequence !== loadSequence) return;
+    error.value = displayError(err, t('chat.loadFailed'));
   }
+}
+
+watch(conversationId, (id, previousId) => {
+  void loadConversation(id, previousId);
+}, { immediate: true });
+
+function handleSocketError(event: Event) {
+  const detail = (event as CustomEvent<{ conversationId?: string; message?: string }>).detail;
+  if (detail?.conversationId === conversationId.value && detail.message) {
+    error.value = detail.message;
+  }
+}
+
+onMounted(() => window.addEventListener('relay:socket-error', handleSocketError));
+onUnmounted(() => {
+  loadSequence += 1;
+  socket.leave(conversationId.value);
+  window.removeEventListener('relay:socket-error', handleSocketError);
 });
 
-onUnmounted(() => socket.leave(conversationId));
-
-async function send(text: string, file: File | null) {
+async function send(
+  text: string,
+  file: File | null,
+  complete: (accepted: boolean) => void
+) {
   sending.value = true;
   error.value = '';
+  let accepted = false;
   try {
     if (!socket.canSendRealtime()) {
       socket.connect();
-      throw new Error('Realtime connection is not ready. Wait a moment and try again.');
+      throw new Error(t('chat.realtimeUnavailable'));
     }
-    const attachments = file ? [await messages.upload(file, conversationId)] : [];
-    messages.send(conversationId, text, attachments);
+    const attachments = file ? [await messages.upload(file, conversationId.value)] : [];
+    messages.send(conversationId.value, text, attachments);
+    accepted = true;
   } catch (err: unknown) {
-    error.value = displayError(err, 'Message send failed');
+    error.value = displayError(err, t('chat.sendFailed'));
   } finally {
     sending.value = false;
+    complete(accepted);
   }
 }
 
 function typing(active: boolean) {
-  socket.send(active ? 'typing:start' : 'typing:stop', { conversation_id: conversationId });
+  socket.sendNow(active ? 'typing:start' : 'typing:stop', {
+    conversation_id: conversationId.value
+  });
 }
 
 async function deleteMessage(messageId: string) {
@@ -90,7 +126,7 @@ async function deleteMessage(messageId: string) {
   try {
     await messages.delete(messageId);
   } catch (err: unknown) {
-    error.value = displayError(err, 'Message delete failed');
+    error.value = displayError(err, t('chat.deleteFailed'));
   }
 }
 </script>

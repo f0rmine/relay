@@ -2,7 +2,7 @@
   <div class="composer">
     <AttachmentPreview :file="file" @clear="file = null" />
     <div class="bar">
-      <ion-button fill="clear" class="attach-button" shape="round" @click="pick" aria-label="Attach file">
+      <ion-button fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
         <ion-icon :icon="attachOutline" />
       </ion-button>
       <input ref="fileInput" class="hidden" type="file" @change="onFile" />
@@ -11,7 +11,7 @@
           ref="textInput"
           v-model="text"
           rows="1"
-          placeholder="Message"
+          :placeholder="t('chat.messagePlaceholder')"
           autocomplete="off"
           autocapitalize="sentences"
           spellcheck="false"
@@ -21,7 +21,7 @@
           @blur="$emit('typing', false)"
         ></textarea>
       </div>
-      <ion-button class="send-button" shape="round" :disabled="!canSend || sending" @click="submit" aria-label="Send message">
+      <ion-button class="send-button" shape="round" :disabled="!canSend || sending" @click="submit" :aria-label="t('chat.sendMessage')">
         <ion-icon :icon="paperPlaneOutline" />
       </ion-button>
     </div>
@@ -32,15 +32,20 @@
 import { computed, ref } from 'vue';
 import { IonButton, IonIcon } from '@ionic/vue';
 import { attachOutline, paperPlaneOutline } from 'ionicons/icons';
+import { useI18n } from 'vue-i18n';
 import AttachmentPreview from './AttachmentPreview.vue';
 
-const emit = defineEmits<{ send: [text: string, file: File | null]; typing: [active: boolean] }>();
+const emit = defineEmits<{
+  send: [text: string, file: File | null, complete: (accepted: boolean) => void];
+  typing: [active: boolean];
+}>();
 defineProps<{ sending?: boolean }>();
 const text = ref('');
 const file = ref<File | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const textInput = ref<HTMLTextAreaElement | null>(null);
 const canSend = computed(() => text.value.trim().length > 0 || file.value);
+const { t } = useI18n();
 
 function pick() {
   fileInput.value?.click();
@@ -59,10 +64,13 @@ function resizeInput() {
 
 function submit() {
   if (!canSend.value) return;
-  emit('send', text.value, file.value);
-  text.value = '';
-  file.value = null;
-  requestAnimationFrame(resizeInput);
+  emit('send', text.value, file.value, (accepted) => {
+    if (!accepted) return;
+    text.value = '';
+    file.value = null;
+    if (fileInput.value) fileInput.value.value = '';
+    requestAnimationFrame(resizeInput);
+  });
 }
 </script>
 

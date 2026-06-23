@@ -32,6 +32,7 @@ export interface Message {
   deleted_by_id?: string | null;
   attachments: Attachment[];
   read_by: string[];
+  request_id?: string;
 }
 
 export interface Conversation {

@@ -10,7 +10,7 @@
     >
       <div v-if="message.deleted_at" class="deleted-state">
         <span class="deleted-icon">×</span>
-        <em>{{ senderName }} deleted message</em>
+        <em>{{ t('chat.deletedBy', { name: senderName }) }}</em>
       </div>
       <template v-else>
         <p v-if="message.text">{{ message.text }}</p>
@@ -20,14 +20,14 @@
         </template>
       </template>
       <div class="time">
-        {{ new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}
-        <span v-if="isPending">sending</span>
+        {{ d(new Date(message.created_at), 'time') }}
+        <span v-if="isPending">{{ t('chat.sending') }}</span>
         <span v-else-if="own">{{ message.read_by.length ? '✓✓' : '✓' }}</span>
       </div>
     </div>
     <ion-action-sheet
       :is-open="actionsOpen"
-      header="Message"
+      :header="t('chat.actionTitle')"
       :buttons="actionButtons"
       css-class="relay-message-actions"
       @didDismiss="actionsOpen = false"
@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { IonActionSheet } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import type { Message } from '@/api/types';
 import FileMessage from './FileMessage.vue';
 import ImageMessage from './ImageMessage.vue';
@@ -46,17 +47,18 @@ const props = defineProps<{ message: Message; own: boolean; senderName: string }
 const emit = defineEmits<{ delete: [] }>();
 const actionsOpen = ref(false);
 let pressTimer: number | undefined;
+const { d, t } = useI18n();
 
 const isPending = computed(() => props.message.id.startsWith('pending-'));
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
 const actionButtons = computed(() => [
   {
-    text: 'Delete for everyone',
+    text: t('chat.deleteEveryone'),
     role: 'destructive',
     handler: () => emit('delete')
   },
   {
-    text: 'Cancel',
+    text: t('common.cancel'),
     role: 'cancel'
   }
 ]);

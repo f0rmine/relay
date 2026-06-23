@@ -21,6 +21,7 @@ async def register_push_token(
     if existing:
         existing.user_id = current_user.id
         existing.platform = payload.platform
+        existing.locale = payload.locale
         existing.device_id = payload.device_id
         existing.enabled = True
         existing.last_seen_at = now
@@ -30,6 +31,7 @@ async def register_push_token(
                 user_id=current_user.id,
                 token=payload.token,
                 platform=payload.platform,
+                locale=payload.locale,
                 device_id=payload.device_id,
                 enabled=True,
                 last_seen_at=now,

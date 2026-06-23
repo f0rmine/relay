@@ -1,6 +1,6 @@
 <template>
   <div ref="scroller" class="window" @scroll.passive="onScroll">
-    <ion-button v-if="hasMore" class="older" fill="clear" size="small" @click="$emit('older')">Load older</ion-button>
+    <ion-button v-if="hasMore" class="older" fill="clear" size="small" @click="$emit('older')">{{ t('chat.loadOlder') }}</ion-button>
     <MessageBubble
       v-for="message in messages"
       :key="message.id"
@@ -16,6 +16,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { IonButton } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import type { Message, User } from '@/api/types';
 import MessageBubble from './MessageBubble.vue';
 import TypingIndicator from './TypingIndicator.vue';
@@ -30,11 +31,12 @@ const props = defineProps<{
 const emit = defineEmits<{ older: []; 'delete-message': [messageId: string] }>();
 const scroller = ref<HTMLElement | null>(null);
 const preservingOlderScroll = ref(false);
+const { t } = useI18n();
 let previousScrollHeight = 0;
 
 function senderName(senderId: string) {
-  if (senderId === props.currentUserId) return 'You';
-  return props.participants?.find((user) => user.id === senderId)?.display_name || 'User';
+  if (senderId === props.currentUserId) return t('common.you');
+  return props.participants?.find((user) => user.id === senderId)?.display_name || t('common.user');
 }
 
 function scrollBottom() {

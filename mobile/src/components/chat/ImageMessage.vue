@@ -1,16 +1,18 @@
 <template>
   <img v-if="imageUrl" class="image" :src="imageUrl" :alt="attachment.original_filename" />
-  <div v-else class="image placeholder">Image unavailable</div>
+  <div v-else class="image placeholder">{{ t('chat.imageUnavailable') }}</div>
 </template>
 
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue';
 import { apiBlob } from '@/api/client';
+import { useI18n } from 'vue-i18n';
 import type { Attachment } from '@/api/types';
 
 const props = defineProps<{ attachment: Attachment }>();
 const imageUrl = ref('');
 let objectUrl = '';
+const { t } = useI18n();
 
 function clearObjectUrl() {
   if (objectUrl) URL.revokeObjectURL(objectUrl);

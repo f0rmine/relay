@@ -8,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("REDIS_REQUIRED", "false")
 os.environ.setdefault("UPLOAD_DIR", "./test-uploads")
 os.environ.setdefault("JWT_SECRET", "test-access-secret-with-at-least-32-bytes")
 os.environ.setdefault("JWT_REFRESH_SECRET", "test-refresh-secret-with-at-least-32-bytes")
+os.environ.setdefault("ENCRYPTION_ACTIVE_KEY_ID", "test-v1")
+os.environ.setdefault(
+    "ENCRYPTION_KEYS",
+    '{"test-v1":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}',
+)
 
 from app import models  # noqa: E402,F401
 from app.api.routes import conversations as conversations_route  # noqa: E402

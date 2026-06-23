@@ -3,6 +3,7 @@ import { apiFetch } from '@/api/client';
 import type { Attachment, Message } from '@/api/types';
 import { useAuthStore } from '@/stores/auth';
 import { useSocketStore } from '@/stores/socket';
+import { translate } from '@/i18n';
 
 interface MessagesState {
   byConversation: Record<string, Message[]>;
@@ -10,6 +11,20 @@ interface MessagesState {
   hasMore: Record<string, boolean>;
   typing: Record<string, Record<string, boolean>>;
   loading: boolean;
+}
+
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPendingTimer(requestId?: string) {
+  if (!requestId) return;
+  const timer = pendingTimers.get(requestId);
+  if (timer) clearTimeout(timer);
+  pendingTimers.delete(requestId);
+}
+
+function clearAllPendingTimers() {
+  pendingTimers.forEach((timer) => clearTimeout(timer));
+  pendingTimers.clear();
 }
 
 export const useMessagesStore = defineStore('messages', {
@@ -21,6 +36,14 @@ export const useMessagesStore = defineStore('messages', {
     loading: false
   }),
   actions: {
+    reset() {
+      clearAllPendingTimers();
+      this.byConversation = {};
+      this.cursors = {};
+      this.hasMore = {};
+      this.typing = {};
+      this.loading = false;
+    },
     async fetch(conversationId: string, older = false) {
       this.loading = true;
       try {
@@ -49,38 +72,44 @@ export const useMessagesStore = defineStore('messages', {
       const auth = useAuthStore();
       const socket = useSocketStore();
       const cleanText = text.trim();
+      const requestId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
       const sent = socket.sendNow('message:send', {
         conversation_id: conversationId,
         text: cleanText || null,
         attachment_ids: attachments.map((item) => item.id)
-      });
+      }, requestId);
       if (!sent) {
-        throw new Error('Realtime connection is not ready. Wait a moment and try again.');
+        throw new Error(translate('chat.realtimeUnavailable'));
       }
       if (auth.user && (cleanText || attachments.length)) {
-        this.addOptimistic(conversationId, auth.user.id, cleanText || null, attachments);
+        this.addOptimistic(
+          conversationId,
+          auth.user.id,
+          cleanText || null,
+          attachments,
+          requestId
+        );
       }
+      return requestId;
     },
     read(conversationId: string) {
       useSocketStore().send('message:read', { conversation_id: conversationId });
     },
     async delete(messageId: string) {
-      const socket = useSocketStore();
-      if (socket.canSendRealtime()) {
-        socket.send('message:delete', { message_id: messageId });
-        return;
-      }
       const message = await apiFetch<Message>(`/messages/${messageId}`, { method: 'DELETE' });
       this.markDeleted(message);
     },
     upsert(message: Message) {
+      clearPendingTimer(message.request_id);
       const list = this.byConversation[message.conversation_id] || [];
-      const pendingIndex = list.findIndex(
-        (item) =>
-          item.id.startsWith('pending-') &&
-          item.sender_id === message.sender_id &&
-          item.text === message.text
-      );
+      const pendingIndex = message.request_id
+        ? list.findIndex((item) => item.id === `pending-${message.request_id}`)
+        : list.findIndex(
+          (item) =>
+            item.id.startsWith('pending-') &&
+            item.sender_id === message.sender_id &&
+            item.text === message.text
+        );
       if (pendingIndex >= 0) list.splice(pendingIndex, 1);
       const index = list.findIndex((item) => item.id === message.id);
       if (index >= 0) list[index] = message;
@@ -98,10 +127,11 @@ export const useMessagesStore = defineStore('messages', {
       conversationId: string,
       senderId: string,
       text: string | null,
-      attachments: Attachment[] = []
+      attachments: Attachment[] = [],
+      requestId?: string
     ) {
       const now = new Date().toISOString();
-      const tempId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      const tempId = requestId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
       this.upsert({
         id: `pending-${tempId}`,
         conversation_id: conversationId,
@@ -113,8 +143,31 @@ export const useMessagesStore = defineStore('messages', {
         deleted_at: null,
         deleted_by_id: null,
         attachments,
-        read_by: []
+        read_by: [],
+        request_id: requestId
       });
+      if (requestId) {
+        clearPendingTimer(requestId);
+        pendingTimers.set(requestId, setTimeout(() => {
+          const conversation = this.failPending(requestId);
+          if (conversation) {
+            window.dispatchEvent(new CustomEvent('relay:socket-error', {
+              detail: { conversationId: conversation, message: translate('chat.sendFailed') }
+            }));
+          }
+        }, 15000));
+      }
+    },
+    failPending(requestId: string): string | undefined {
+      clearPendingTimer(requestId);
+      for (const [conversationId, list] of Object.entries(this.byConversation)) {
+        const index = list.findIndex((message) => message.id === `pending-${requestId}`);
+        if (index >= 0) {
+          list.splice(index, 1);
+          return conversationId;
+        }
+      }
+      return undefined;
     },
     markDeleted(message: Message) {
       this.upsert(message);
