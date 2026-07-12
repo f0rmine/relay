@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -54,10 +57,18 @@ class ConnectionManager:
                 await websocket.send_json(event)
             except (RuntimeError, WebSocketDisconnect):
                 stale.append(websocket)
+            except Exception:
+                logger.exception("Removing WebSocket that failed during event delivery")
+                stale.append(websocket)
         if stale:
             async with self._lock:
                 for websocket in stale:
-                    self.user_connections.get(user_id, set()).discard(websocket)
+                    remaining = self.user_connections.get(user_id)
+                    if remaining is None:
+                        continue
+                    remaining.discard(websocket)
+                    if not remaining:
+                        self.user_connections.pop(user_id, None)
 
     async def broadcast_to_users(
         self, redis: Redis, user_ids: list[str], event_type: str, payload: dict
@@ -65,17 +76,21 @@ class ConnectionManager:
         event = {"type": event_type, "payload": payload}
         for user_id in set(user_ids):
             await self.send_to_user(user_id, event)
-        await redis.publish(
-            "pubsub:broadcast",
-            json.dumps(
-                {
-                    "origin": self.instance_id,
-                    "user_ids": list(set(user_ids)),
-                    "event": event,
-                },
-                default=str,
-            ),
-        )
+        try:
+            await redis.publish(
+                "pubsub:broadcast",
+                json.dumps(
+                    {
+                        "origin": self.instance_id,
+                        "user_ids": list(set(user_ids)),
+                        "event": event,
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            # The business operation may already be committed and delivered locally.
+            logger.exception("Redis realtime fanout failed")
 
     async def redis_subscriber(self, redis: Redis) -> None:
         pubsub = redis.pubsub()
@@ -88,10 +103,17 @@ class ConnectionManager:
                     data = json.loads(message["data"])
                 except (json.JSONDecodeError, TypeError):
                     continue
+                if not isinstance(data, dict):
+                    continue
                 if data.get("origin") == self.instance_id:
                     continue
-                for user_id in data.get("user_ids", []):
-                    await self.send_to_user(user_id, data["event"])
+                event = data.get("event")
+                user_ids = data.get("user_ids")
+                if not isinstance(event, dict) or not isinstance(user_ids, list):
+                    continue
+                for user_id in user_ids:
+                    if isinstance(user_id, str):
+                        await self.send_to_user(user_id, event)
         finally:
             await pubsub.aclose()
 

@@ -88,7 +88,7 @@ async def create_message(
                         Attachment.id.in_(attachment_ids),
                         Attachment.uploader_id == user.id,
                         Attachment.message_id.is_(None),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         )

@@ -39,4 +39,4 @@ docker compose "${COMPOSE_ARGS[@]}" run --rm backend alembic upgrade head
 docker compose "${COMPOSE_ARGS[@]}" up -d backend
 
 echo "Backend is starting on http://localhost:8000"
-echo "Health: curl http://localhost:8000/health"
+echo "Readiness: curl http://localhost:8000/health/ready"

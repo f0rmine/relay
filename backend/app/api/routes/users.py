@@ -1,5 +1,6 @@
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.redis import get_redis
@@ -50,7 +51,11 @@ async def update_profile(payload: ProfileUpdate, current_user: CurrentUser, db: 
         if existing is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "Email already exists")
         current_user.email = email
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already exists") from exc
     await db.refresh(current_user)
     return UserPublic.model_validate(current_user)
 
