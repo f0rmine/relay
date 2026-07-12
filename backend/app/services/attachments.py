@@ -1,3 +1,4 @@
+from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,6 +19,8 @@ from app.models.conversation import ConversationParticipant
 from app.models.message import Message
 from app.models.user import User
 from app.services.uploads import read_upload_limited
+
+MAX_ORIGINAL_FILENAME_LENGTH = 255
 
 ALLOWED_MIME_TYPES = {
     "image/jpeg",
@@ -58,12 +61,24 @@ def sniff_image_type(data: bytes) -> str | None:
     return None
 
 
+def normalized_filename(filename: str | None) -> str:
+    name = (filename or "upload").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not name:
+        name = "upload"
+    if len(name) > MAX_ORIGINAL_FILENAME_LENGTH:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filename is too long")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filename contains invalid characters")
+    return name
+
+
 async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachment:
     settings = get_settings()
-    content_type = file.content_type
+    original_filename = normalized_filename(file.filename)
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     if content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported file type")
-    suffix = Path(file.filename or "").suffix.lower()
+    suffix = Path(original_filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS_BY_MIME_TYPE[content_type]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File extension does not match file type")
 
@@ -82,13 +97,10 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
     upload_dir = settings.upload_dir / "attachments"
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / stored_filename
-    async with aiofiles.open(path, "wb") as out:
-        await out.write(encrypted_data.ciphertext)
-
     attachment = Attachment(
         id=attachment_id,
         uploader_id=user.id,
-        original_filename=file.filename or "upload",
+        original_filename=original_filename,
         stored_filename=stored_filename,
         mime_type=content_type,
         file_size=len(data),
@@ -99,8 +111,16 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
         encryption_key_id=encrypted_data.key_id,
         encryption_version=encrypted_data.version,
     )
-    db.add(attachment)
-    await db.commit()
+    try:
+        async with aiofiles.open(path, "wb") as out:
+            await out.write(encrypted_data.ciphertext)
+        db.add(attachment)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        with suppress(FileNotFoundError):
+            path.unlink()
+        raise
     await db.refresh(attachment)
     return attachment
 

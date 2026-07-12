@@ -1,0 +1,25 @@
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+
+  redis:
+    restart: unless-stopped
+
+  backend:
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
+      ENCRYPTION_ACTIVE_KEY_ID: ${ENCRYPTION_ACTIVE_KEY_ID:?ENCRYPTION_ACTIVE_KEY_ID is required}
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:?ENCRYPTION_KEYS is required}
+      PASSWORD_RESET_TOKEN_IN_RESPONSE: "false"
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
