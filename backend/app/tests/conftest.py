@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("UPLOAD_DIR", "./test-uploads")
 os.environ.setdefault("JWT_SECRET", "test-access-secret-with-at-least-32-bytes")
 os.environ.setdefault("JWT_REFRESH_SECRET", "test-refresh-secret-with-at-least-32-bytes")
+os.environ.setdefault("PASSWORD_RESET_TOKEN_IN_RESPONSE", "true")
 os.environ.setdefault("ENCRYPTION_ACTIVE_KEY_ID", "test-v1")
 os.environ.setdefault(
     "ENCRYPTION_KEYS",
@@ -22,13 +24,14 @@ from app.api.routes import conversations as conversations_route  # noqa: E402
 from app.api.routes import messages as messages_route  # noqa: E402
 from app.api.routes import users as users_route  # noqa: E402
 from app.core.database import Base, get_db  # noqa: E402
-from app.core.rate_limit import clear_auth_rate_limit  # noqa: E402
+from app.core.rate_limit import auth_rate_limit, clear_auth_rate_limit  # noqa: E402
 from app.main import app  # noqa: E402
 
 
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.presence: dict[str, dict[str, float]] = {}
 
     async def ping(self) -> bool:
         return True
@@ -47,6 +50,34 @@ class FakeRedis:
 
     async def publish(self, channel: str, value: str) -> int:
         return 0
+
+    async def eval(self, script: str, key_count: int, key: str, *args) -> int:
+        from app.services.presence import IS_ONLINE_SCRIPT, SET_OFFLINE_SCRIPT, SET_ONLINE_SCRIPT
+
+        members = self.presence.setdefault(key, {})
+        if script == SET_ONLINE_SCRIPT:
+            now, expires_at, instance_id, _ttl = args
+            members = {
+                member: score for member, score in members.items() if score > float(now)
+            }
+            became_online = not members
+            members[str(instance_id)] = float(expires_at)
+            self.presence[key] = members
+            return int(became_online)
+        if script == SET_OFFLINE_SCRIPT:
+            instance_id, now = args
+            members.pop(str(instance_id), None)
+            self.presence[key] = {
+                member: score for member, score in members.items() if score > float(now)
+            }
+            return len(self.presence[key])
+        if script == IS_ONLINE_SCRIPT:
+            now = float(args[0])
+            self.presence[key] = {
+                member: score for member, score in members.items() if score > now
+            }
+            return len(self.presence[key])
+        raise AssertionError("Unexpected Redis script")
 
 
 @pytest.fixture()
@@ -72,6 +103,7 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
         return fake_redis
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[auth_rate_limit] = lambda: None
     users_route.get_redis = fake_get_redis
     conversations_route.get_redis = fake_get_redis
     messages_route.get_redis = fake_get_redis

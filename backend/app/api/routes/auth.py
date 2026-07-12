@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import CurrentUser, DbSession
+from app.core.config import get_settings
 from app.core.rate_limit import auth_rate_limit
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -65,7 +66,7 @@ async def forgot_password(payload: ForgotPasswordRequest, db: DbSession) -> Forg
     reset_token = await auth_service.create_password_reset_token(db, payload.email)
     return ForgotPasswordResponse(
         detail="If the email exists, a password reset token has been generated.",
-        reset_token=reset_token,
+        reset_token=reset_token if get_settings().password_reset_token_in_response else None,
     )
 
 

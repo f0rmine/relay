@@ -18,7 +18,11 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [
+            {key: value for key, value in error.items() if key != "input"}
+            for error in exc.errors()
+        ]
         return JSONResponse(
-            {"detail": jsonable_encoder(exc.errors())},
+            {"detail": jsonable_encoder(errors)},
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )

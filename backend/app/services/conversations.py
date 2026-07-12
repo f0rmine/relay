@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -91,10 +91,39 @@ async def latest_message(db: AsyncSession, conversation_id: str) -> Message | No
             select(Message)
             .options(selectinload(Message.attachments), selectinload(Message.reads))
             .where(Message.conversation_id == conversation_id)
-            .order_by(desc(Message.created_at))
+            .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
         )
     ).first()
+
+
+async def latest_messages(
+    db: AsyncSession, conversation_ids: list[str]
+) -> dict[str, Message]:
+    if not conversation_ids:
+        return {}
+    ranked = (
+        select(
+            Message.id.label("message_id"),
+            func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=(desc(Message.created_at), desc(Message.id)),
+            )
+            .label("position"),
+        )
+        .where(Message.conversation_id.in_(conversation_ids))
+        .subquery()
+    )
+    rows = (
+        await db.scalars(
+            select(Message)
+            .join(ranked, ranked.c.message_id == Message.id)
+            .where(ranked.c.position == 1)
+            .options(selectinload(Message.attachments), selectinload(Message.reads))
+        )
+    ).unique().all()
+    return {message.conversation_id: message for message in rows}
 
 
 async def unread_count(db: AsyncSession, conversation_id: str, user_id: str) -> int:
@@ -117,34 +146,75 @@ async def unread_count(db: AsyncSession, conversation_id: str, user_id: str) -> 
     return int(await db.scalar(stmt) or 0)
 
 
+async def unread_counts(
+    db: AsyncSession, conversation_ids: list[str], user_id: str
+) -> dict[str, int]:
+    if not conversation_ids:
+        return {}
+    rows = await db.execute(
+        select(Message.conversation_id, func.count(Message.id))
+        .join(
+            ConversationParticipant,
+            and_(
+                ConversationParticipant.conversation_id == Message.conversation_id,
+                ConversationParticipant.user_id == user_id,
+            ),
+        )
+        .where(
+            Message.conversation_id.in_(conversation_ids),
+            Message.sender_id != user_id,
+            Message.deleted_at.is_(None),
+            or_(
+                ConversationParticipant.last_read_at.is_(None),
+                Message.created_at > ConversationParticipant.last_read_at,
+            ),
+        )
+        .group_by(Message.conversation_id)
+    )
+    counts = {conversation_id: int(count) for conversation_id, count in rows.all()}
+    return {conversation_id: counts.get(conversation_id, 0) for conversation_id in conversation_ids}
+
+
 async def mark_conversation_read(db: AsyncSession, conversation_id: str, user_id: str) -> list[str]:
     await require_participant(db, conversation_id, user_id)
     now = datetime.now(UTC)
     participant = (
         await db.scalars(
-            select(ConversationParticipant).where(
+            select(ConversationParticipant)
+            .where(
                 ConversationParticipant.conversation_id == conversation_id,
                 ConversationParticipant.user_id == user_id,
             )
+            .with_for_update()
         )
     ).one()
+    previous_last_read_at = participant.last_read_at
     participant.last_read_at = now
-    unread_messages = (
-        await db.scalars(
-            select(Message).where(
-                Message.conversation_id == conversation_id,
-                Message.sender_id != user_id,
-                Message.deleted_at.is_(None),
-            )
+    unread_query = select(Message.id).where(
+        Message.conversation_id == conversation_id,
+        Message.sender_id != user_id,
+        Message.deleted_at.is_(None),
+        Message.created_at <= now,
+    )
+    if previous_last_read_at is not None:
+        unread_query = unread_query.where(Message.created_at > previous_last_read_at)
+    candidate_ids = list((await db.scalars(unread_query)).all())
+
+    existing_ids: set[str] = set()
+    if candidate_ids:
+        existing_ids = set(
+            (
+                await db.scalars(
+                    select(MessageRead.message_id).where(
+                        MessageRead.user_id == user_id,
+                        MessageRead.message_id.in_(candidate_ids),
+                    )
+                )
+            ).all()
         )
-    ).all()
-    message_ids: list[str] = []
-    for message in unread_messages:
-        exists = await db.scalar(
-            select(MessageRead.id).where(MessageRead.message_id == message.id, MessageRead.user_id == user_id)
-        )
-        if not exists:
-            db.add(MessageRead(message_id=message.id, user_id=user_id))
-            message_ids.append(message.id)
+    message_ids = [message_id for message_id in candidate_ids if message_id not in existing_ids]
+    db.add_all(
+        [MessageRead(message_id=message_id, user_id=user_id) for message_id in message_ids]
+    )
     await db.commit()
     return message_ids

@@ -10,8 +10,10 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
 from app.models.device import DeviceToken
 from app.models.message import Message
 from app.models.user import User
@@ -38,6 +40,49 @@ PUSH_PREVIEW_LABELS = {
 
 _fcm_config_disabled_until = 0.0
 _fcm_config_lock = asyncio.Lock()
+_push_tasks: set[asyncio.Task] = set()
+
+
+def _push_task_finished(task: asyncio.Task) -> None:
+    _push_tasks.discard(task)
+    if task.cancelled():
+        return
+    exception = task.exception()
+    if exception is not None:
+        logger.error(
+            "Background push task failed",
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+
+
+async def _send_message_push_by_id(
+    recipient_ids: list[str], sender_id: str, message_id: str
+) -> None:
+    async with AsyncSessionLocal() as db:
+        sender = await db.get(User, sender_id)
+        message = (
+            await db.scalars(
+                select(Message)
+                .where(Message.id == message_id)
+                .options(selectinload(Message.attachments))
+            )
+        ).first()
+        if sender is None or message is None:
+            return
+        await send_message_push(db, recipient_ids, sender, message)
+
+
+def schedule_message_push(recipient_ids: list[str], sender_id: str, message_id: str) -> None:
+    if not recipient_ids:
+        return
+    task = asyncio.create_task(_send_message_push_by_id(recipient_ids, sender_id, message_id))
+    _push_tasks.add(task)
+    task.add_done_callback(_push_task_finished)
+
+
+async def drain_push_tasks() -> None:
+    if _push_tasks:
+        await asyncio.gather(*tuple(_push_tasks), return_exceptions=True)
 
 
 @lru_cache
@@ -152,16 +197,19 @@ async def send_message_push(
     if not tokens:
         return
 
-    try:
-        access_token = await _access_token()
-    except Exception as exc:
-        if _pause_fcm_config_errors():
-            logger.warning(
-                "FCM push attempts paused for %s seconds after credential error: %s",
-                FCM_CONFIG_ERROR_COOLDOWN_SECONDS,
-                type(exc).__name__,
-            )
-        return
+    async with _fcm_config_lock:
+        if _fcm_config_error_active():
+            return
+        try:
+            access_token = await _access_token()
+        except Exception as exc:
+            if _pause_fcm_config_errors():
+                logger.warning(
+                    "FCM push attempts paused for %s seconds after credential error: %s",
+                    FCM_CONFIG_ERROR_COOLDOWN_SECONDS,
+                    type(exc).__name__,
+                )
+            return
     if not access_token:
         return
 
@@ -170,54 +218,51 @@ async def send_message_push(
     )
     title = sender.display_name or sender.username
 
-    async with _fcm_config_lock:
-        if _fcm_config_error_active():
-            return
-        async with httpx.AsyncClient(timeout=10) as client:
-            for token in tokens:
-                body = push_preview(message, token.locale)
-                payload = {
-                    "message": {
-                        "token": token.token,
+    async with httpx.AsyncClient(timeout=10) as client:
+        for token in tokens:
+            body = push_preview(message, token.locale)
+            payload = {
+                "message": {
+                    "token": token.token,
+                    "notification": {
+                        "title": title,
+                        "body": body,
+                    },
+                    "data": {
+                        "conversation_id": message.conversation_id,
+                        "message_id": message.id,
+                        "sender_id": sender.id,
+                    },
+                    "android": {
+                        "priority": "HIGH",
                         "notification": {
-                            "title": title,
-                            "body": body,
+                            "channel_id": "messages",
+                            "click_action": "OPEN_CHAT",
                         },
-                        "data": {
-                            "conversation_id": message.conversation_id,
-                            "message_id": message.id,
-                            "sender_id": sender.id,
-                        },
-                        "android": {
-                            "priority": "HIGH",
-                            "notification": {
-                                "channel_id": "messages",
-                                "click_action": "OPEN_CHAT",
-                            },
-                        },
-                    }
+                    },
                 }
-                try:
-                    response = await client.post(
-                        endpoint,
-                        json=payload,
-                        headers={"Authorization": f"Bearer {access_token}"},
+            }
+            try:
+                response = await client.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if response.status_code in {400, 404}:
+                    token.enabled = False
+                elif response.status_code >= 400:
+                    summary = _fcm_error_summary(response)
+                    logger.warning(
+                        "FCM push failed: %s %s",
+                        response.status_code,
+                        summary,
                     )
-                    if response.status_code in {400, 404}:
-                        token.enabled = False
-                    elif response.status_code >= 400:
-                        summary = _fcm_error_summary(response)
+                    if _mark_fcm_config_error(response, summary):
                         logger.warning(
-                            "FCM push failed: %s %s",
-                            response.status_code,
-                            summary,
+                            "FCM push attempts paused for %s seconds after configuration error",
+                            FCM_CONFIG_ERROR_COOLDOWN_SECONDS,
                         )
-                        if _mark_fcm_config_error(response, summary):
-                            logger.warning(
-                                "FCM push attempts paused for %s seconds after configuration error",
-                                FCM_CONFIG_ERROR_COOLDOWN_SECONDS,
-                            )
-                            break
-                except httpx.HTTPError:
-                    logger.exception("FCM push request failed")
+                        break
+            except httpx.HTTPError:
+                logger.exception("FCM push request failed")
     await db.commit()

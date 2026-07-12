@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -24,12 +26,13 @@ from app.schemas.ws import (
 from app.services.conversations import latest_message, mark_conversation_read, require_participant
 from app.services.messages import create_message, delete_message_for_everyone
 from app.services.presence import clear_typing, set_offline, set_online, set_typing
-from app.services.push import send_message_push
+from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
 from app.websocket.manager import manager
 
 router = APIRouter()
 PRESENCE_HEARTBEAT_SECONDS = 15
+logger = logging.getLogger(__name__)
 
 
 async def participant_ids_for_user(db: AsyncSession, user_id: str) -> list[str]:
@@ -63,11 +66,11 @@ async def authenticate_websocket(db: AsyncSession, websocket: WebSocket) -> User
     return await get_ws_user_from_token(db, payload.token)
 
 
-async def refresh_presence(redis, user_id: str) -> None:
+async def refresh_presence(redis, user_id: str, instance_id: str) -> None:
     try:
         while True:
             await asyncio.sleep(PRESENCE_HEARTBEAT_SECONDS)
-            await set_online(redis, user_id)
+            await set_online(redis, user_id, instance_id)
     except asyncio.CancelledError:
         raise
 
@@ -84,17 +87,25 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
         except Exception:
+            logger.exception("Unexpected WebSocket authentication failure")
             await websocket.close(code=1008)
             return
 
-        await manager.register(user.id, websocket)
-        await websocket.send_json({"type": "auth:ok", "payload": {"user_id": user.id}})
-        await set_online(redis, user.id)
-        presence_task = asyncio.create_task(refresh_presence(redis, user.id))
-        peer_ids = await participant_ids_for_user(db, user.id)
-        await manager.broadcast_to_users(redis, peer_ids, "user:online", {"user_id": user.id})
-
+        presence_task: asyncio.Task | None = None
+        registered = False
         try:
+            await manager.register(user.id, websocket)
+            registered = True
+            await websocket.send_json({"type": "auth:ok", "payload": {"user_id": user.id}})
+            became_online = await set_online(redis, user.id, manager.instance_id)
+            presence_task = asyncio.create_task(
+                refresh_presence(redis, user.id, manager.instance_id)
+            )
+            if became_online:
+                peer_ids = await participant_ids_for_user(db, user.id)
+                await manager.broadcast_to_users(
+                    redis, peer_ids, "user:online", {"user_id": user.id}
+                )
             while True:
                 try:
                     raw = await websocket.receive_json()
@@ -117,19 +128,28 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         except WebSocketDisconnect:
             pass
         finally:
-            presence_task.cancel()
-            await manager.disconnect(user.id, websocket)
-            if not manager.is_connected(user.id):
-                await set_offline(redis, user.id)
-                user.last_seen_at = datetime.now(UTC)
-                await db.commit()
-                peer_ids = await participant_ids_for_user(db, user.id)
-                await manager.broadcast_to_users(
-                    redis,
-                    peer_ids,
-                    "user:offline",
-                    {"user_id": user.id, "last_seen_at": user.last_seen_at.isoformat()},
-                )
+            if presence_task is not None:
+                presence_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await presence_task
+            if registered:
+                await manager.disconnect(user.id, websocket)
+            if registered and not manager.is_connected(user.id):
+                try:
+                    still_online = await set_offline(redis, user.id, manager.instance_id)
+                    if not still_online:
+                        user.last_seen_at = datetime.now(UTC)
+                        await db.commit()
+                        peer_ids = await participant_ids_for_user(db, user.id)
+                        await manager.broadcast_to_users(
+                            redis,
+                            peer_ids,
+                            "user:offline",
+                            {"user_id": user.id, "last_seen_at": user.last_seen_at.isoformat()},
+                        )
+                except Exception:
+                    await db.rollback()
+                    logger.exception("Failed to finalize disconnected WebSocket presence")
 
 
 async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: WebSocketEnvelope) -> None:
@@ -194,7 +214,7 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
             and not manager.is_connected(participant_id)
             and not manager.is_in_room(payload.conversation_id, participant_id)
         ]
-        await send_message_push(db, push_recipient_ids, user, message)
+        schedule_message_push(push_recipient_ids, user.id, message.id)
         return
 
     if envelope.type == "message:delete":

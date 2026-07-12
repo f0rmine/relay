@@ -43,6 +43,8 @@ const backendErrorKeys: Record<string, string> = {
   'Empty file upload': 'api.errors.emptyFile',
   'File is too large': 'api.errors.fileTooLarge',
   'Image content does not match file type': 'api.errors.imageTypeMismatch',
+  'Filename is too long': 'api.errors.filenameTooLong',
+  'Filename contains invalid characters': 'api.errors.invalidFilename',
   'File missing from storage': 'api.errors.fileMissing',
   'Attachment not found': 'api.errors.attachmentNotFound',
   'Empty avatar upload': 'api.errors.emptyAvatar',

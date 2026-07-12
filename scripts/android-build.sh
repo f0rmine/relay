@@ -7,7 +7,18 @@ cd "$ROOT_DIR/mobile"
 npm install
 npm run build
 npm test
+
+ICON_SOURCE="$ROOT_DIR/mobile/assets/logo.png"
+if [[ -f "$ICON_SOURCE" ]]; then
+npm run assets:android
+else
+  echo "Android icon source not found: $ICON_SOURCE"
+  echo "Using the currently generated launcher icon resources."
+fi
+
+export CAPACITOR_ALLOW_CLEARTEXT="${CAPACITOR_ALLOW_CLEARTEXT:-true}"
 npx cap sync android
+npm run android:configure
 
 if [[ -d "/usr/lib/jvm/java-21-openjdk-amd64" ]]; then
   export JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"

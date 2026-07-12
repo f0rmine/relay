@@ -89,7 +89,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-access-log
 Optional seed users:
 
 ```bash
-python -m app.scripts_seed
+RELAY_SEED_PASSWORD='<demo-password>' python -m app.scripts_seed
 ```
 
 ## Docker Setup
@@ -109,6 +109,14 @@ Backend API: `http://localhost:8000`
 PostgreSQL and Redis host ports are bound to `127.0.0.1` for local diagnostics only. Containers talk through the private Compose network, so ports `5432` and `6379` should not be exposed to the LAN or the internet.
 
 On startup, the backend validates the active encryption key. Missing keys, unknown active key IDs, invalid Base64, and keys that are not exactly 32 bytes stop the app instead of quietly storing plaintext. A small check, but a very useful one.
+
+For a production-style host, fill every required value in `.env`, place an HTTPS/WSS reverse proxy in front of the loopback backend port, and use the strict override:
+
+```bash
+./scripts/backend-production-start.sh
+```
+
+This applies `docker-compose.production.yml`, forces `ENVIRONMENT=production`, rejects development JWT defaults, disables reset-token responses, requires explicit secrets, and binds the backend to `127.0.0.1` for the reverse proxy.
 
 ### Encryption key rotation
 
@@ -133,16 +141,18 @@ Run these from anywhere inside the repository:
 
 ```bash
 ./scripts/backend-start.sh     # build backend, start Postgres/Redis, run migrations, start API
+./scripts/backend-production-start.sh # strict production profile on a loopback port
 ./scripts/backend-stop.sh      # stop Docker Compose services
 ./scripts/backend-logs.sh      # follow backend container logs
 ./scripts/backend-migrate.sh   # run Alembic migrations
 ./scripts/backend-test.sh      # run backend pytest suite
+./scripts/security-audit.sh    # pip-audit, Bandit, and npm audit
 ./scripts/mobile-dev.sh        # start Ionic/Vite browser dev server
 ./scripts/android-build.sh     # build and copy latest debug APK
 ./scripts/smoke-messages.sh    # dummy users, all-to-all WebSocket messages, and one image attachment check
 ./scripts/firebase-check.sh    # print safe Firebase service-account/IAM diagnostics
 ./scripts/rotate-jwt-secrets.sh # rotate ignored local .env JWT secrets without printing them
-./scripts/health.sh            # check http://localhost:8000/health
+./scripts/health.sh            # check PostgreSQL, Redis, and Pub/Sub readiness
 ./scripts/health.sh http://100.106.107.54:8000
 ./scripts/smoke-messages.sh http://100.106.107.54:8000
 ```
@@ -154,9 +164,11 @@ cd backend
 pip install -e ".[dev]"
 pytest
 ruff check app
+pip-audit
+bandit -q -r app -x app/tests,app/scripts_delete_dummy.py
 ```
 
-The tests use an async SQLite database and fake Redis for the core behavior: registration, login, protected route access, user search, private conversation creation, message service persistence, read receipts, soft delete, and upload validation.
+The 50 backend tests cover authentication, token rotation/JTI compatibility, production configuration, Redis rate limiting and multi-instance presence, private conversations, batching, message persistence, read receipts, soft delete, uploads, WebSockets, background push scheduling, readiness, and encryption. PostgreSQL-specific behavior is additionally exercised by the smoke test against Docker Compose.
 
 ## Mobile Tests
 
@@ -166,7 +178,7 @@ npm install
 npm test
 ```
 
-The mobile tests verify translation dictionary parity and the reconciliation of optimistic messages with server acknowledgements or errors.
+The six mobile tests verify translation dictionary parity, optimistic-message reconciliation, timeout/error cleanup, and the web Content Security Policy.
 
 ## Mobile Setup
 
@@ -212,6 +224,25 @@ VITE_WS_BASE_URL=ws://192.168.1.50:8000
 ```
 
 ## Android Build
+
+Place the application icon at `mobile/assets/logo.png`. It must be a square PNG of at least 1024x1024 pixels. Keep important artwork inside the central safe area so Android adaptive icon masks do not crop it.
+
+Generate the Android launcher resources after changing the icon:
+
+```bash
+cd mobile
+npm run assets:android
+```
+
+The project build script runs this generation automatically when the source icon exists.
+
+`npm install` also applies a narrow Capacitor CLI 6 compatibility patch for the security-pinned `tar@7.5.16`. Keep `mobile/scripts/patch-capacitor-cli.mjs` until Capacitor and all native plugins are upgraded together; the script fails clearly if a future CLI no longer matches the expected code.
+
+`android-build.sh` builds a LAN-friendly debug APK and enables cleartext traffic explicitly. For an HTTPS/WSS build, disable it explicitly; Android backup remains disabled in both modes:
+
+```bash
+CAPACITOR_ALLOW_CLEARTEXT=false ./scripts/android-build.sh
+```
 
 ```bash
 cd mobile
@@ -356,8 +387,9 @@ The app uses UUID strings as IDs. PostgreSQL remains the source of truth for all
 
 ## Redis Keys
 
-- `presence:user:{user_id}`: short-lived online marker
+- `presence:user:{user_id}`: sorted set of short-lived per-backend-instance presence leases
 - `typing:conversation:{conversation_id}:user:{user_id}`: short-lived typing marker
+- `rate_limit:auth:{sha256}`: shared fixed-window auth attempt counter
 - `pubsub:broadcast`: WebSocket event fanout channel
 
 Redis data is temporary and safe to lose.
@@ -370,13 +402,13 @@ Redis data is temporary and safe to lose.
 - Native Android stores access and refresh tokens in Android Keystore-backed secure storage. Browser development uses a `localStorage` fallback; a public browser deployment should move refresh tokens to HttpOnly secure cookies for stronger XSS isolation.
 - New message text and attachment bytes are encrypted at rest with AES-256-GCM using a unique random nonce per record.
 - Encryption keys are versioned. New records use `ENCRYPTION_ACTIVE_KEY_ID`; old key IDs must remain in `ENCRYPTION_KEYS` until their records are re-encrypted.
-- Auth-sensitive endpoints have a simple in-process per-IP rate limiter.
+- Auth-sensitive endpoints use a shared Redis per-IP/path rate limiter.
 - Routes and WebSocket actions validate the current user.
 - Only conversation participants can read, send, delete, or mark messages as read.
 - Uploads use generated filenames and allow only images plus common document MIME types/extensions.
 - Avatar files are public so profiles can render them; chat attachment files require authenticated route access.
 - Message text is rendered as plain text in Vue, not unsafe HTML.
-- Docker runs Uvicorn with access logging disabled so WebSocket JWT query tokens are not printed in normal container logs.
+- WebSocket authentication is sent in the first frame rather than the URL, so access logs never contain JWT query parameters. The runtime container uses a non-root application user and limits WebSocket frames to 1 MiB.
 - For public deployments, run the backend behind HTTPS/WSS and rotate JWT and data-encryption keys.
 
 This is server-side encryption at rest, not end-to-end encryption: the running backend can decrypt authorized responses and push previews. Database dumps and copied upload volumes do not contain plaintext for newly stored messages/files, but compromise of both the backend and its encryption keys can expose content.
@@ -401,7 +433,7 @@ Back up PostgreSQL regularly and keep uploaded files on persistent storage.
 
 ## Known Limitations
 
-- Password reset returns a token through the API instead of sending email over SMTP.
+- Password reset email delivery is not implemented. The API returns `reset_token: null` by default; token exposure is an explicit development-only option and is rejected in production mode.
 - FCM push notifications require Firebase project setup and are disabled by default in `.env`.
 - Closed-app notifications require Android/Firebase credentials; local WebSocket notifications work without Firebase.
 - Group chats, voice messages, message editing, reactions, blocking/reporting, and admin moderation are not implemented.

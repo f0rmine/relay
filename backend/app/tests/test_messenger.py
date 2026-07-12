@@ -18,6 +18,7 @@ def auth_headers(token: str) -> dict[str, str]:
 async def test_register_login_and_protected_me(client: AsyncClient) -> None:
     tokens = await register(client, "alice", "alice@example.com")
     assert tokens["user"]["username"] == "alice"
+    assert tokens["user"]["avatar_url"] is None
     assert "password_hash" not in tokens["user"]
 
     login = await client.post(
@@ -54,6 +55,23 @@ async def test_register_trims_and_rejects_blank_display_name(client: AsyncClient
     assert blank.status_code == 422
 
 
+async def test_validation_errors_do_not_echo_sensitive_input(client: AsyncClient) -> None:
+    password = "short7"
+    response = await client.post(
+        "/auth/register",
+        json={
+            "username": "alice",
+            "display_name": "Alice",
+            "email": "alice@example.com",
+            "password": password,
+        },
+    )
+
+    assert response.status_code == 422
+    assert password not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
 async def test_refresh_token_rotation_rejects_reuse(client: AsyncClient) -> None:
     tokens = await register(client, "alice", "alice@example.com")
 
@@ -74,6 +92,38 @@ async def test_refresh_token_rotation_rejects_reuse(client: AsyncClient) -> None
         json={"refresh_token": refreshed.json()["refresh_token"]},
     )
     assert second_refresh.status_code == 200
+
+
+async def test_refresh_token_uses_jti_and_supports_legacy_rows(client: AsyncClient) -> None:
+    from app.core.database import get_db
+    from app.core.security import decode_jwt_token
+    from app.main import app
+    from app.models.auth import RefreshToken
+
+    tokens = await register(client, "alice", "alice@example.com")
+    payload = decode_jwt_token(tokens["refresh_token"], "refresh")
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        token_row = (
+            await db.scalars(select(RefreshToken).where(RefreshToken.jti == payload["jti"]))
+        ).first()
+        assert token_row is not None
+        await db.execute(
+            RefreshToken.__table__.update()
+            .where(RefreshToken.jti == payload["jti"])
+            .values(jti=None)
+        )
+        await db.commit()
+        break
+
+    refreshed = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+
+    assert refreshed.status_code == 200
+    assert decode_jwt_token(refreshed.json()["refresh_token"], "refresh")["jti"]
 
 
 async def test_password_reset_revokes_refresh_sessions_and_reset_tokens(
@@ -114,6 +164,26 @@ async def test_password_reset_revokes_refresh_sessions_and_reset_tokens(
         json={"refresh_token": tokens["refresh_token"]},
     )
     assert reused_refresh.status_code == 401
+
+
+async def test_password_reset_token_is_hidden_without_explicit_debug_setting(
+    client: AsyncClient, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.api.routes import auth as auth_route
+
+    await register(client, "alice", "alice@example.com")
+    monkeypatch.setattr(
+        auth_route,
+        "get_settings",
+        lambda: SimpleNamespace(password_reset_token_in_response=False),
+    )
+
+    response = await client.post("/auth/forgot-password", json={"email": "alice@example.com"})
+
+    assert response.status_code == 200
+    assert response.json()["reset_token"] is None
 
 
 async def test_user_search_excludes_current_user(client: AsyncClient) -> None:
@@ -186,6 +256,39 @@ async def test_avatar_upload_validation(client: AsyncClient) -> None:
     )
     assert valid.status_code == 200
     assert valid.json()["avatar_url"].startswith("/uploads/avatars/")
+
+
+async def test_replacing_avatar_removes_previous_local_file(
+    client: AsyncClient, monkeypatch, tmp_path
+) -> None:
+    from app.services import users as users_service
+
+    monkeypatch.setattr(
+        users_service,
+        "get_settings",
+        lambda: SimpleNamespace(upload_dir=tmp_path, max_upload_size_bytes=1024),
+    )
+    alice = await register(client, "alice", "alice@example.com")
+    image = b"\x89PNG\r\n\x1a\npayload"
+
+    first = await client.post(
+        "/users/me/avatar",
+        headers=auth_headers(alice["access_token"]),
+        files={"file": ("first.png", image, "image/png")},
+    )
+    first_path = tmp_path / "avatars" / first.json()["avatar_url"].rsplit("/", 1)[-1]
+    assert first_path.exists()
+
+    second = await client.post(
+        "/users/me/avatar",
+        headers=auth_headers(alice["access_token"]),
+        files={"file": ("second.png", image, "image/png")},
+    )
+    second_path = tmp_path / "avatars" / second.json()["avatar_url"].rsplit("/", 1)[-1]
+
+    assert second.status_code == 200
+    assert second_path.exists()
+    assert not first_path.exists()
 
 
 async def test_private_conversation_message_read_and_delete(client: AsyncClient, monkeypatch) -> None:
@@ -394,6 +497,113 @@ async def test_message_history_pagination_returns_next_cursor(client: AsyncClien
     assert body["next_cursor"] is not None
 
 
+async def test_conversation_list_batches_latest_messages_and_unread_counts(
+    client: AsyncClient,
+) -> None:
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    charlie = await register(client, "charlie", "charlie@example.com")
+    bob_conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    charlie_conversation = await client.post(
+        "/conversations",
+        json={"participant_id": charlie["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        bob_user = await db.get(User, bob["user"]["id"])
+        charlie_user = await db.get(User, charlie["user"]["id"])
+        await create_message(db, bob_user, bob_conversation.json()["id"], "bob first", [])
+        await create_message(db, bob_user, bob_conversation.json()["id"], "bob latest", [])
+        await create_message(
+            db, charlie_user, charlie_conversation.json()["id"], "charlie latest", []
+        )
+        break
+
+    response = await client.get(
+        "/conversations", headers=auth_headers(alice["access_token"])
+    )
+
+    assert response.status_code == 200
+    by_id = {conversation["id"]: conversation for conversation in response.json()}
+    assert by_id[bob_conversation.json()["id"]]["latest_message"]["text"] == "bob latest"
+    assert by_id[bob_conversation.json()["id"]]["unread_count"] == 2
+    assert (
+        by_id[charlie_conversation.json()["id"]]["latest_message"]["text"]
+        == "charlie latest"
+    )
+    assert by_id[charlie_conversation.json()["id"]]["unread_count"] == 1
+
+
+async def test_repeated_read_only_creates_receipts_for_new_messages(client: AsyncClient) -> None:
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.message import MessageRead
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        first_message = await create_message(db, sender, conversation_id, "first", [])
+        break
+
+    first_read = await client.post(
+        f"/conversations/{conversation_id}/read",
+        headers=auth_headers(bob["access_token"]),
+    )
+    repeated_read = await client.post(
+        f"/conversations/{conversation_id}/read",
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert first_read.json()["message_ids"] == [first_message.id]
+    assert repeated_read.json()["message_ids"] == []
+
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        second_message = await create_message(db, sender, conversation_id, "second", [])
+        break
+
+    second_read = await client.post(
+        f"/conversations/{conversation_id}/read",
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert second_read.json()["message_ids"] == [second_message.id]
+
+    async for db in override():
+        receipts = list(
+            (
+                await db.scalars(
+                    select(MessageRead).where(MessageRead.user_id == bob["user"]["id"])
+                )
+            ).all()
+        )
+        assert {receipt.message_id for receipt in receipts} == {
+            first_message.id,
+            second_message.id,
+        }
+        break
+
+
 async def test_message_history_cursor_handles_equal_timestamps(client: AsyncClient) -> None:
     alice = await register(client, "alice", "alice@example.com")
     bob = await register(client, "bob", "bob@example.com")
@@ -471,6 +681,62 @@ async def test_file_upload_validation(client: AsyncClient) -> None:
     )
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["original_filename"] == "note.txt"
+
+    normalized = await client.post(
+        "/attachments/upload",
+        headers=auth_headers(alice["access_token"]),
+        files={"file": ("../../safe.txt", b"hello", "text/plain")},
+    )
+    assert normalized.status_code == 201
+    assert normalized.json()["original_filename"] == "safe.txt"
+
+    too_long = await client.post(
+        "/attachments/upload",
+        headers=auth_headers(alice["access_token"]),
+        files={"file": (f"{'a' * 252}.txt", b"hello", "text/plain")},
+    )
+    assert too_long.status_code == 400
+    assert too_long.json()["detail"] == "Filename is too long"
+
+
+async def test_failed_attachment_commit_removes_written_file(monkeypatch, tmp_path) -> None:
+    from io import BytesIO
+
+    import pytest
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from app.services import attachments as attachment_service
+
+    class FailedDatabase:
+        rolled_back = False
+
+        def add(self, attachment) -> None:
+            return None
+
+        async def commit(self) -> None:
+            raise RuntimeError("database unavailable")
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+    database = FailedDatabase()
+    monkeypatch.setattr(
+        attachment_service,
+        "get_settings",
+        lambda: SimpleNamespace(upload_dir=tmp_path, max_upload_size_bytes=1024),
+    )
+    upload = UploadFile(
+        filename="note.txt",
+        file=BytesIO(b"hello"),
+        headers=Headers({"content-type": "text/plain"}),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await attachment_service.save_upload(database, SimpleNamespace(id="user-1"), upload)
+
+    assert database.rolled_back is True
+    assert list((tmp_path / "attachments").iterdir()) == []
 
 
 async def test_upload_reader_stops_above_limit() -> None:
@@ -835,11 +1101,11 @@ async def test_websocket_connect_sends_auth_ok_before_events(client: AsyncClient
     async def fake_get_redis() -> FakeRedis:
         return FakeRedis()
 
-    async def fake_set_online(redis, user_id: str) -> None:
-        return None
+    async def fake_set_online(redis, user_id: str, instance_id: str) -> bool:
+        return True
 
-    async def fake_set_offline(redis, user_id: str) -> None:
-        return None
+    async def fake_set_offline(redis, user_id: str, instance_id: str) -> bool:
+        return False
 
     async def fake_peer_ids(db, user_id: str) -> list[str]:
         return []
@@ -890,7 +1156,7 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
 
     sent_json: list[dict] = []
     broadcasts: list[tuple[list[str], str, dict]] = []
-    push_calls: list[tuple[list[str], str]] = []
+    push_calls: list[tuple[list[str], str, str]] = []
 
     class FakeWebSocket:
         async def send_json(self, payload: dict) -> None:
@@ -899,15 +1165,13 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
     async def fake_broadcast(redis, user_ids: list[str], event_type: str, payload: dict) -> None:
         broadcasts.append((user_ids, event_type, payload))
 
-    async def fake_push(db, recipient_ids: list[str], sender: User, message: Message) -> None:
-        from app.services.messages import plaintext_message_text
-
-        push_calls.append((recipient_ids, plaintext_message_text(message) or ""))
+    def fake_schedule_push(recipient_ids: list[str], sender_id: str, message_id: str) -> None:
+        push_calls.append((recipient_ids, sender_id, message_id))
 
     monkeypatch.setattr(websocket_routes.manager, "broadcast_to_users", fake_broadcast)
     monkeypatch.setattr(websocket_routes.manager, "is_connected", lambda user_id: False)
     monkeypatch.setattr(websocket_routes.manager, "is_in_room", lambda conversation_id, user_id: False)
-    monkeypatch.setattr(websocket_routes, "send_message_push", fake_push)
+    monkeypatch.setattr(websocket_routes, "schedule_message_push", fake_schedule_push)
 
     override = app.dependency_overrides[get_db]
     async for db in override():
@@ -939,7 +1203,31 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
     assert broadcasts[0][2]["text"] == "hello over ws"
     assert broadcasts[0][2]["request_id"] == "client-request-1"
     assert [event for _, event, _ in broadcasts] == ["message:new", "conversation:updated"]
-    assert push_calls == [([bob["user"]["id"]], "hello over ws")]
+    assert push_calls == [([bob["user"]["id"]], alice["user"]["id"], persisted.id)]
+
+
+async def test_scheduled_push_runs_outside_message_handler_and_drains(monkeypatch) -> None:
+    import asyncio
+
+    from app.services import push
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[tuple[list[str], str, str]] = []
+
+    async def delayed_push(recipient_ids: list[str], sender_id: str, message_id: str) -> None:
+        calls.append((recipient_ids, sender_id, message_id))
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(push, "_send_message_push_by_id", delayed_push)
+
+    push.schedule_message_push(["recipient"], "sender", "message")
+    await started.wait()
+    assert calls == [(["recipient"], "sender", "message")]
+
+    release.set()
+    await push.drain_push_tasks()
 
 
 async def test_websocket_delete_updates_conversation_preview(client: AsyncClient, monkeypatch) -> None:
@@ -1049,4 +1337,90 @@ async def test_connection_manager_removes_stale_websocket() -> None:
 
     await manager.broadcast_to_users(FakeRedis(), ["user-1"], "message:new", {"id": "message-1"})
 
-    assert not manager.user_connections["user-1"]
+    assert "user-1" not in manager.user_connections
+
+
+async def test_connection_manager_keeps_local_delivery_when_redis_publish_fails() -> None:
+    from app.websocket.manager import ConnectionManager
+
+    delivered: list[dict] = []
+
+    class LocalWebSocket:
+        async def send_json(self, payload: dict) -> None:
+            delivered.append(payload)
+
+    class FailedRedis:
+        async def publish(self, channel: str, value: str) -> int:
+            raise ConnectionError("redis unavailable")
+
+    manager = ConnectionManager()
+    manager.user_connections["user-1"].add(LocalWebSocket())
+
+    await manager.broadcast_to_users(
+        FailedRedis(), ["user-1"], "message:new", {"id": "message-1"}
+    )
+
+    assert delivered == [{"type": "message:new", "payload": {"id": "message-1"}}]
+
+
+async def test_readiness_checks_database_redis_and_subscriber(client: AsyncClient, monkeypatch) -> None:
+    from app import main as main_module
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def execute(self, statement) -> None:
+            return None
+
+    class RunningTask:
+        def done(self) -> bool:
+            return False
+
+    async def healthy_redis() -> None:
+        return None
+
+    monkeypatch.setattr(main_module, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(main_module, "ping_redis", healthy_redis)
+    main_module.app.state.redis_subscriber_task = RunningTask()
+
+    response = await client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "checks": {"database": True, "redis": True, "subscriber": True},
+    }
+
+
+async def test_readiness_returns_503_without_dependencies(client: AsyncClient, monkeypatch) -> None:
+    from app import main as main_module
+
+    class FailedSession:
+        async def __aenter__(self):
+            raise ConnectionError("database unavailable")
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+    class StoppedTask:
+        def done(self) -> bool:
+            return True
+
+    async def failed_redis() -> None:
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(main_module, "AsyncSessionLocal", FailedSession)
+    monkeypatch.setattr(main_module, "ping_redis", failed_redis)
+    main_module.app.state.redis_subscriber_task = StoppedTask()
+
+    response = await client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "checks": {"database": False, "redis": False, "subscriber": False},
+    }
