@@ -291,6 +291,57 @@ async def test_replacing_avatar_removes_previous_local_file(
     assert not first_path.exists()
 
 
+async def test_rest_message_send_is_idempotent_by_sender_client_id(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+    payload = {
+        "client_message_id": "offline-client-message-1",
+        "conversation_id": conversation_id,
+        "text": "saved offline",
+        "attachment_ids": [],
+    }
+
+    first = await client.post(
+        "/messages", json=payload, headers=auth_headers(alice["access_token"])
+    )
+    duplicate = await client.post(
+        "/messages", json=payload, headers=auth_headers(alice["access_token"])
+    )
+
+    assert first.status_code == 201, first.text
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["id"] == first.json()["id"]
+    assert first.json()["client_message_id"] == "offline-client-message-1"
+
+    history = await client.get(
+        f"/conversations/{conversation_id}/messages",
+        headers=auth_headers(alice["access_token"]),
+    )
+    matching = [
+        message
+        for message in history.json()["items"]
+        if message["client_message_id"] == "offline-client-message-1"
+    ]
+    assert len(matching) == 1
+
+
+async def test_rest_message_send_requires_client_id(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    response = await client.post(
+        "/messages",
+        json={"conversation_id": "conversation-1", "text": "hello"},
+        headers=auth_headers(alice["access_token"]),
+    )
+
+    assert response.status_code == 422
+
+
 async def test_private_conversation_message_read_and_delete(client: AsyncClient, monkeypatch) -> None:
     alice = await register(client, "alice", "alice@example.com")
     bob = await register(client, "bob", "bob@example.com")
@@ -1191,13 +1242,38 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
                 },
             ),
         )
-        persisted = (
-            await db.scalars(select(Message).where(Message.conversation_id == conversation_id))
-        ).first()
+        await websocket_routes.handle_event(
+            db,
+            redis=None,
+            websocket=FakeWebSocket(),
+            user=sender,
+            envelope=WebSocketEnvelope(
+                type="message:send",
+                request_id="client-request-1",
+                payload={
+                    "conversation_id": conversation_id,
+                    "text": "hello over ws",
+                    "attachment_ids": [],
+                },
+            ),
+        )
+        persisted_rows = list(
+            (
+                await db.scalars(
+                    select(Message).where(Message.conversation_id == conversation_id)
+                )
+            ).all()
+        )
+        persisted = persisted_rows[0]
         break
 
-    assert sent_json == []
+    assert len(persisted_rows) == 1
+    assert len(sent_json) == 1
+    assert sent_json[0]["type"] == "message:new"
+    assert sent_json[0]["payload"]["id"] == broadcasts[0][2]["id"]
+    assert sent_json[0]["payload"]["request_id"] == "client-request-1"
     assert persisted is not None
+    assert persisted.client_message_id == "client-request-1"
     assert persisted.text is None
     assert b"hello over ws" not in persisted.text_ciphertext
     assert broadcasts[0][2]["text"] == "hello over ws"
