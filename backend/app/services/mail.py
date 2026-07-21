@@ -26,6 +26,7 @@ def _build_password_reset_message(settings: Settings, recipient: str, token: str
     message.set_content(
         "A password reset was requested for your Relay account.\n\n"
         f"Open this link to choose a new password:\n{reset_url}\n\n"
+        f"If the link does not open the Relay client, paste this reset token:\n{token}\n\n"
         "This link expires in one hour. If you did not request this, you can ignore this email."
     )
     return message

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=14, ge=1, le=365)
     password_reset_token_in_response: bool = False
     password_reset_email_enabled: bool = False
-    password_reset_url: str = "relay://reset-password"
+    password_reset_url: str = "http://localhost:8100/reset-password"
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str | None = None
@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     firebase_project_id: str | None = None
     firebase_service_account_file: Path | None = None
     push_notifications_enabled: bool = False
+    metrics_enabled: bool = False
+    metrics_bearer_token: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -56,6 +58,7 @@ class Settings(BaseSettings):
         "smtp_username",
         "smtp_password",
         "smtp_from_address",
+        "metrics_bearer_token",
         mode="before",
     )
     @classmethod
@@ -91,6 +94,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Enabled password reset email delivery requires SMTP_HOST and SMTP_FROM_ADDRESS"
             )
+        if self.metrics_enabled and (
+            self.metrics_bearer_token is None or len(self.metrics_bearer_token) < 32
+        ):
+            raise ValueError(
+                "Enabled metrics require a bearer token of at least 32 characters"
+            )
         if self.environment == "production":
             unsafe_prefixes = ("dev-", "change-me")
             if self.jwt_secret.startswith(unsafe_prefixes) or self.jwt_refresh_secret.startswith(
@@ -103,6 +112,13 @@ class Settings(BaseSettings):
                 raise ValueError("Password reset tokens cannot be exposed in production")
             if self.password_reset_email_enabled and not (self.smtp_use_tls or self.smtp_starttls):
                 raise ValueError("Production password reset email delivery requires TLS or STARTTLS")
+            if (
+                self.password_reset_email_enabled
+                and urlsplit(self.password_reset_url).scheme != "https"
+            ):
+                raise ValueError(
+                    "Production password reset email delivery requires an HTTPS reset URL"
+                )
             if self.push_notifications_enabled and (
                 not self.firebase_project_id or not self.firebase_service_account_file
             ):

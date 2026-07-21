@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.encryption import get_encryption_keyring
 from app.core.errors import install_exception_handlers
+from app.core.observability import REQUEST_ID_HEADER, install_observability, metrics_response
 from app.core.redis import close_redis, get_redis, ping_redis
 from app.services.push import drain_push_tasks
 from app.websocket.manager import manager
@@ -56,7 +57,7 @@ settings = get_settings()
 get_encryption_keyring()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,7 +65,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[REQUEST_ID_HEADER],
 )
+install_observability(app)
 install_exception_handlers(app)
 
 app.include_router(auth.router)
@@ -104,4 +107,13 @@ async def readiness() -> JSONResponse:
     return JSONResponse(
         {"status": "ok" if ready else "not_ready", "checks": checks},
         status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics(request: Request):
+    return metrics_response(
+        request,
+        enabled=settings.metrics_enabled,
+        bearer_token=settings.metrics_bearer_token,
     )
