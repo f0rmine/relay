@@ -17,7 +17,7 @@ Relay is a real-time messenger built around a FastAPI backend and an Android-fir
 ## Features
 
 - Register/login/logout, access tokens, refresh tokens, protected routes
-- Password reset token generation API
+- SMTP password recovery with forgot/reset screens and enumeration-safe responses
 - User search by username, display name, or email
 - Local initial avatars and avatar upload
 - Private one-to-one conversations only for v1
@@ -31,6 +31,8 @@ Relay is a real-time messenger built around a FastAPI backend and an Android-fir
 - Versioned encryption keys for rotation without invalidating older encrypted records
 - Local notifications for realtime messages outside the active chat
 - Firebase Cloud Messaging push-token support for closed-app message notifications
+- Request IDs, structured HTTP logs, protected Prometheus-compatible metrics, and readiness checks
+- GitHub Actions CI plus verified PostgreSQL/uploads backup and restore scripts
 - English/Ukrainian interface with a persisted in-app language selector
 - Android double-back exit from the conversations screen
 - Soft delete for everyone
@@ -120,6 +122,47 @@ For a production-style host, fill every required value in `.env`, place an HTTPS
 
 This applies `docker-compose.production.yml`, forces `ENVIRONMENT=production`, rejects development JWT defaults, disables reset-token responses, requires explicit secrets, and binds the backend to `127.0.0.1` for the reverse proxy.
 
+### Password recovery
+
+Enable SMTP delivery and point the reset URL at the deployed client route:
+
+```env
+PASSWORD_RESET_EMAIL_ENABLED=true
+PASSWORD_RESET_URL=https://relay.example.com/reset-password
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=relay
+SMTP_PASSWORD=replace-me
+SMTP_FROM_ADDRESS=no-reply@example.com
+SMTP_USE_TLS=false
+SMTP_STARTTLS=true
+```
+
+The forgot-password response is identical for known and unknown addresses. SMTP runs as an in-process background task; delivery failures do not expose account existence or secrets, but a process crash can lose an in-flight email. Production rejects unencrypted SMTP delivery and non-HTTPS reset URLs. Keep `PASSWORD_RESET_TOKEN_IN_RESPONSE=false` outside controlled local development.
+
+### Monitoring and CI
+
+`GET /health` is the liveness check and `GET /health/ready` verifies PostgreSQL, Redis, and the Pub/Sub subscriber. To expose process-local Prometheus-compatible HTTP counters and latency histograms, set:
+
+```env
+METRICS_ENABLED=true
+METRICS_BEARER_TOKEN=replace-with-at-least-32-random-characters
+```
+
+Scrape `GET /metrics` with `Authorization: Bearer <token>`. Every HTTP response also receives an `X-Request-ID`; a safe caller-provided ID is preserved for correlation. Metrics reset when the backend process restarts and are not aggregated across replicas. `.github/workflows/ci.yml` runs backend, mobile, security, Compose, and shell checks on pushes and pull requests.
+
+### Backups
+
+`./scripts/backup.sh --production` briefly stops a running backend to capture a coherent PostgreSQL custom dump and uploads archive, then writes checksums and a manifest into a permission-restricted timestamped directory. Back up `.env` secrets and the complete encryption keyring separately; they are deliberately excluded from the archive.
+
+Validate the target and keep an independent copy before running the destructive restore:
+
+```bash
+./scripts/restore.sh --production --yes backups/relay-20260722T120000Z
+```
+
+The scripts provide local automation, not off-site replication or scheduled backup jobs. Periodically test restoration on a separate environment.
+
 ### Encryption key rotation
 
 Generate a new 32-byte key, keep the previous key in the JSON map, and change only the active ID:
@@ -149,6 +192,8 @@ Run these from anywhere inside the repository:
 ./scripts/backend-migrate.sh   # run Alembic migrations
 ./scripts/backend-test.sh      # run backend pytest suite
 ./scripts/security-audit.sh    # pip-audit, Bandit, and npm audit
+./scripts/backup.sh --production # consistent PostgreSQL and uploads backup
+./scripts/restore.sh --production --yes backups/relay-TIMESTAMP # verified destructive restore
 ./scripts/mobile-dev.sh        # start Ionic/Vite browser dev server
 ./scripts/android-build.sh     # build and copy latest debug APK
 ./scripts/smoke-messages.sh    # dummy users, all-to-all WebSocket messages, and one image attachment check
@@ -170,7 +215,7 @@ pip-audit
 bandit -q -r app -x app/tests,app/scripts_delete_dummy.py
 ```
 
-The 50 backend tests cover authentication, token rotation/JTI compatibility, production configuration, Redis rate limiting and multi-instance presence, private conversations, batching, message persistence, read receipts, soft delete, uploads, WebSockets, background push scheduling, readiness, and encryption. PostgreSQL-specific behavior is additionally exercised by the smoke test against Docker Compose.
+The 64 backend tests cover authentication, email password recovery, token rotation/JTI compatibility, production configuration, Redis rate limiting and multi-instance presence, private conversations, batching, message persistence, read receipts, soft delete, uploads, WebSockets, background push scheduling, readiness, metrics/request IDs, and encryption. PostgreSQL-specific behavior is additionally exercised by the smoke test against Docker Compose.
 
 ## Mobile Tests
 
@@ -180,7 +225,7 @@ npm install
 npm test
 ```
 
-The six mobile tests verify translation dictionary parity, optimistic-message reconciliation, timeout/error cleanup, and the web Content Security Policy.
+The 13 mobile tests verify translation parity, password-recovery validation, durable offline delivery/cache behavior, optimistic-message reconciliation, and the web/Capacitor security configuration.
 
 ## Mobile Setup
 
@@ -433,11 +478,13 @@ Linux server with Docker Engine:
 3. Run migrations and start the stack.
 4. Use a domain with Caddy/Nginx and HTTPS, or use a VPN such as Tailscale for private access.
 
-Back up PostgreSQL regularly and keep uploaded files on persistent storage.
+Run `./scripts/backup.sh --production` regularly, copy backups off-host, retain the encryption keyring separately, and test restoration on an isolated environment.
 
 ## Known Limitations
 
-- Password reset email delivery is not implemented. The API returns `reset_token: null` by default; token exposure is an explicit development-only option and is rejected in production mode.
+- SMTP password-reset delivery is in-process rather than durable; a process crash can lose an email that was already scheduled.
+- Prometheus-compatible metrics are process-local, and alerting/centralized log collection are not bundled.
+- Backup/restore scripts are local and operator-triggered; scheduling, off-site replication, and restore drills remain deployment responsibilities.
 - FCM push notifications require Firebase project setup and are disabled by default in `.env`.
 - Closed-app notifications require Android/Firebase credentials; local WebSocket notifications work without Firebase.
 - Group chats, voice messages, message editing, reactions, blocking/reporting, and admin moderation are not implemented.

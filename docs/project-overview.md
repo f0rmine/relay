@@ -1,6 +1,6 @@
 # Relay Messenger: повний контекст проєкту
 
-Цей документ описує фактичний стан репозиторію Relay Messenger. Він призначений як технічний контекст для розробника або іншої мовної моделі. У документі не заявлено функцій, яких немає у коді.
+Цей документ описує фактичний стан Relay Messenger 1.2.0. Він призначений як технічний контекст для розробника або іншої мовної моделі. У документі не заявлено функцій, яких немає у коді.
 
 ## 1. Призначення проєкту
 
@@ -19,7 +19,7 @@ Relay Messenger — клієнт-серверний застосунок для 
 - access і refresh JWT;
 - rotation refresh token;
 - logout і відкликання refresh token;
-- серверний password reset token flow;
+- password recovery через SMTP, forgot/reset client screens і server-side reset token flow;
 - отримання та редагування профілю;
 - avatar upload або локальний placeholder з ініціалами, який формує frontend;
 - пошук інших користувачів за username, display name та email;
@@ -71,15 +71,13 @@ Relay Messenger — клієнт-серверний застосунок для 
 - user blocking/reporting;
 - admin panel;
 - moderation tools;
-- email delivery password reset link;
-- forgot/reset password screens у mobile client;
 - наскрізне шифрування E2EE;
 - S3-compatible object storage;
 - reverse proxy у Docker Compose;
 - автоматичне HTTPS provisioning;
 - background job queue;
 - automated Android UI/instrumentation tests;
-- CI/CD pipeline.
+- continuous delivery і автоматичний deployment pipeline.
 
 ## 4. Загальна архітектура
 
@@ -139,7 +137,9 @@ Firebase Cloud Messaging використовується для Android push de
 
 `mobile/scripts/generate-android-icons.mjs` генерує Android launcher resources.
 
-`scripts` містить команди запуску, зупинки, migration, tests, healthcheck, smoke test, Firebase check та Android build.
+`scripts` містить команди запуску, зупинки, migration, tests, healthcheck, smoke test, Firebase check, backup/restore та Android build.
+
+`.github/workflows/ci.yml` запускає backend, mobile, security, Compose і shell checks для push та pull request.
 
 ## 6. Backend technology stack
 
@@ -171,6 +171,8 @@ PyJWT створює і перевіряє JWT.
 
 HTTPX і Google Auth використовуються для Firebase HTTP v1.
 
+Стандартні модулі `smtplib` та `email` використовуються для password-reset email через SMTP; blocking SMTP I/O переноситься в thread через `asyncio.to_thread`.
+
 ## 7. Backend lifecycle
 
 Під час імпорту application backend перевіряє encryption key configuration і створює uploads/avatar directories.
@@ -201,7 +203,7 @@ Refresh token зберігається у PostgreSQL тільки як Argon2 ha
 
 Password reset token також зберігається як hash. Після reset він позначається використаним, а active refresh sessions користувача відкликаються.
 
-Password recovery реалізовано частково: backend генерує reset token, але email не надсилається. За замовчуванням endpoint повертає однакову generic response незалежно від існування email, а поле `reset_token` має значення `null`. Для локальної демонстрації token можна явно дозволити через `PASSWORD_RESET_TOKEN_IN_RESPONSE=true`; production-конфігурація забороняє цей режим.
+Password recovery завершено на backend і mobile рівнях. Backend генерує reset token, зберігає тільки його hash і за ввімкненої конфігурації надсилає URL через SMTP background task. Endpoint повертає однакову generic response незалежно від існування email, а поле `reset_token` за замовчуванням має значення `null`. Для локальної демонстрації token можна явно дозволити через `PASSWORD_RESET_TOKEN_IN_RESPONSE=true`; production-конфігурація забороняє цей режим. SMTP delivery є in-process і може втратити незавершений email під час crash.
 
 Auth endpoints мають Redis-backed fixed-window rate limit: 20 attempts за 60 секунд на комбінацію IP і route. Atomic Lua operation робить limiter спільним для кількох backend processes або instances.
 
@@ -291,6 +293,8 @@ FastAPI автоматично надає Swagger UI за `/docs`, ReDoc за `/
 
 `GET /health/ready` перевіряє PostgreSQL, Redis та стан Pub/Sub subscriber. Саме цей endpoint використовується Docker healthcheck і script `./scripts/health.sh`.
 
+`GET /metrics` за ввімкненого `METRICS_ENABLED` повертає Prometheus-сумісні process-local counters і latency histogram. Endpoint завжди захищається bearer token довжиною щонайменше 32 символи. HTTP middleware повертає `X-Request-ID`, веде структурований access log і використовує route templates замість фактичних IDs, щоб обмежити cardinality.
+
 Auth routes:
 
 - `POST /auth/register` створює користувача та token pair;
@@ -298,7 +302,7 @@ Auth routes:
 - `POST /auth/refresh` виконує token rotation;
 - `POST /auth/logout` відкликає refresh token;
 - `GET /auth/me` повертає current user;
-- `POST /auth/forgot-password` створює reset token;
+- `POST /auth/forgot-password` створює reset token і планує SMTP delivery, якщо воно ввімкнене;
 - `POST /auth/reset-password` змінює password.
 
 User routes:
@@ -513,7 +517,11 @@ Sharp використовується тільки під час development/bu
 
 `/profile` відкриває `ProfileView.vue`.
 
-Login і register routes позначені guest-only.
+`/forgot-password` приймає email і завжди показує generic success state після успішної API response.
+
+`/reset-password` приймає token із query parameter або поля вставлення, перевіряє password і confirmation та після успіху повертає користувача на login.
+
+Login, register, forgot-password і reset-password routes позначені guest-only.
 
 Conversations, chat, search і profile routes позначені authenticated.
 
@@ -647,6 +655,12 @@ Build script також створює timestamped `relay-debug-<timestamp>.apk`
 
 `PASSWORD_RESET_TOKEN_IN_RESPONSE` дозволяє показати reset token тільки для контрольованої локальної демонстрації. У production значення повинно бути `false`.
 
+`PASSWORD_RESET_EMAIL_ENABLED` вмикає SMTP delivery reset link.
+
+`PASSWORD_RESET_URL` задає absolute client URL, до якого безпечно додається query parameter `token`.
+
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_USE_TLS`, `SMTP_STARTTLS` і `SMTP_TIMEOUT_SECONDS` задають email transport. Production дозволяє delivery лише через TLS або STARTTLS та вимагає HTTPS reset URL.
+
 `CORS_ORIGINS` є comma-separated allowlist.
 
 `UPLOAD_DIR` задає storage path.
@@ -662,6 +676,10 @@ Build script також створює timestamped `relay-debug-<timestamp>.apk`
 `FIREBASE_PROJECT_ID` задає Firebase project.
 
 `FIREBASE_SERVICE_ACCOUNT_FILE` задає path до private service account JSON.
+
+`METRICS_ENABLED` вмикає `/metrics`.
+
+`METRICS_BEARER_TOKEN` захищає metrics endpoint; для ввімкнених metrics потрібно щонайменше 32 символи в кожному environment.
 
 `VITE_API_BASE_URL` задає mobile/web REST base URL.
 
@@ -703,6 +721,8 @@ Backend image збирається multi-stage Dockerfile. Runtime image не м
 
 Reverse proxy не входить до Compose. Для public access потрібно додати Caddy, Nginx або інший HTTPS/WSS proxy.
 
+`scripts/backup.sh` коротко quiesce-ить backend, створює PostgreSQL custom dump та uploads archive, додає SHA-256 checksums і manifest та публікує backup directory атомарно. `scripts/restore.sh` вимагає `--yes`, перевіряє checksums і archive paths, відновлює database та замінює uploads через staging із rollback файлів. Encryption keyring і secrets не входять до backup та повинні зберігатися окремо.
+
 ## 27. Запуск проєкту
 
 Для першого backend запуску потрібно скопіювати `.env.example` у `.env`, замінити database password, JWT secrets та encryption key, а потім виконати `./scripts/backend-start.sh`.
@@ -735,21 +755,23 @@ Backend test command — `./scripts/backend-test.sh`.
 
 Script створює `backend/.venv`, встановлює dev dependencies, запускає pytest і Ruff.
 
-У проєкті є 52 backend tests.
+У проєкті є 64 backend tests.
 
-Backend tests покривають registration, login, protected API, refresh rotation, legacy token compatibility, password reset, production configuration guards, distributed rate limit, multi-instance presence, profile, search, avatar replacement і validation, private conversation, batched latest-message/unread queries, messages, read receipts, soft delete, pagination, upload cleanup/validation, push token lifecycle, background FCM scheduling, FCM errors, readiness endpoint, WebSocket authentication/broadcast/persistence/delete, stale connection cleanup, seed-script safety та encryption/key rotation.
+Backend tests покривають registration, login, protected API, refresh rotation, legacy token compatibility, SMTP password recovery, production configuration guards, distributed rate limit, multi-instance presence, profile, search, avatar replacement і validation, private conversation, batched latest-message/unread queries, messages, read receipts, soft delete, pagination, upload cleanup/validation, push token lifecycle, background FCM scheduling, FCM errors, readiness/metrics/request-ID observability, WebSocket authentication/broadcast/persistence/delete, stale connection cleanup, seed-script safety та encryption/key rotation.
 
 Backend tests використовують async SQLite і test doubles для Redis/FCM там, де external integration не потрібна.
 
 Frontend test command — `cd mobile` та `npm test`.
 
-У проєкті є 10 frontend tests у чотирьох files.
+У проєкті є 13 frontend tests у п'яти files.
 
-Frontend tests перевіряють translation key parity, durable enqueue до network attempt, idempotency key reuse, rejected-message retry, restart restoration, IndexedDB attachment bytes, confirmed-history cache filtering і базові security invariants HTML/Capacitor configuration.
+Frontend tests перевіряють translation key parity, password recovery validation, durable enqueue до network attempt, idempotency key reuse, rejected-message retry, restart restoration, IndexedDB attachment bytes, confirmed-history cache filtering і базові security invariants HTML/Capacitor configuration.
 
 Frontend type-check і production build виконуються через `npm run build`.
 
 Dependency та static security checks запускаються через `./scripts/security-audit.sh`. Script виконує `pip-audit`, Bandit і `npm audit`.
+
+GitHub Actions workflow автоматично запускає backend tests/Ruff, frontend tests/build, security audit, Compose validation і shell syntax checks.
 
 Smoke test запускається через `./scripts/smoke-messages.sh http://localhost:8000`.
 
@@ -771,7 +793,7 @@ Public deployment без HTTPS/WSS є небезпечним.
 
 Service account JSON, JWT secrets, PostgreSQL password і encryption keys не повинні потрапляти у Git.
 
-Перед production deployment потрібні secret manager, HTTPS, firewall, backups, encryption key backup/rotation, object storage, malware scanning, monitoring, centralized logs, dependency scanning і threat modeling.
+Перед production deployment потрібні secret manager, HTTPS, firewall, off-site backup schedule і restore drills, encryption key backup/rotation, object storage, malware scanning, alerting, centralized logs і threat modeling.
 
 ## 30. Основні технічні обмеження
 
@@ -785,16 +807,16 @@ Uploads volume потрібно резервувати разом із PostgreSQ
 
 Локальне file storage не підходить для незалежного горизонтального масштабування без shared filesystem.
 
-Немає автоматизованого reverse proxy, TLS certificate management, CI/CD, metrics або alerting.
+Немає автоматизованого reverse proxy, TLS certificate management, continuous deployment або alerting. Наявні metrics є process-local і обнуляються після restart.
 
 Немає Android UI tests.
 
-Password reset не завершений на рівні email і frontend UX.
+Password-reset email виконується як in-process background task без durable queue; потрібен зовнішній SMTP provider і коректний deployed client URL.
 
 Повноцінне E2EE потребуватиме окремої device-key architecture, identity verification, prekeys, session protocol, multi-device support та recovery strategy. Його не можна коректно додати лише одним AES key у client.
 
 ## 31. Рекомендований напрям подальшої роботи
 
-Найближчими практичними покращеннями є SMTP/email password recovery, external HTTPS reverse proxy, object storage, backup automation, CI checks, monitoring і Android UI tests.
+Найближчими практичними покращеннями є external HTTPS reverse proxy, object storage, scheduled off-site backups із restore drills, durable background queue, metrics aggregation/alerting і Android UI tests.
 
 Після цього можна розглядати push delivery через background queue, group chats, editing/reactions і повноцінне E2EE на базі перевіреного протоколу, а не власної криптографічної схеми.
