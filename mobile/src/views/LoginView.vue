@@ -11,8 +11,10 @@
       <div class="content-wrap auth-card">
         <h1>Relay</h1>
         <p class="muted">{{ t('auth.login.subtitle') }}</p>
+        <StatusState v-if="resetComplete" :message="t('auth.reset.success')" />
         <ErrorState v-if="error" :message="error" />
         <LoginForm :loading="auth.loading" @submit="submit" />
+        <ion-button fill="clear" expand="block" router-link="/forgot-password">{{ t('auth.login.forgotPassword') }}</ion-button>
         <ion-button fill="clear" expand="block" router-link="/register">{{ t('auth.login.createAccount') }}</ion-button>
       </div>
     </ion-content>
@@ -20,20 +22,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { IonButton, IonContent, IonPage, IonHeader, IonToolbar, IonButtons } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import LoginForm from '@/components/auth/LoginForm.vue';
 import LanguageSelector from '@/components/LanguageSelector.vue';
 import ErrorState from '@/components/ErrorState.vue';
+import StatusState from '@/components/StatusState.vue';
 import { displayError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
+const route = useRoute();
 const router = useRouter();
 const error = ref('');
 const { t } = useI18n();
+const resetComplete = computed(() => route.query.reset === 'success');
 
 async function submit(login: string, password: string) {
   error.value = '';
