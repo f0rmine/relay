@@ -12,6 +12,7 @@ backend/relay_backend.egg-info/
 backend/uploads/
 backend/test-uploads/
 backend/backend/
+backups/
 
 mobile/node_modules/
 mobile/dist/
