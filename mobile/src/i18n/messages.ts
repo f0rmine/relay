@@ -24,6 +24,7 @@ export const messages = {
         subtitle: 'Sign in to continue.',
         loginLabel: 'Username or email',
         action: 'Log in',
+        forgotPassword: 'Forgot password?',
         createAccount: 'Create account',
         failed: 'Login failed'
       },
@@ -33,6 +34,30 @@ export const messages = {
         action: 'Create account',
         existingAccount: 'I already have an account',
         failed: 'Registration failed'
+      },
+      forgot: {
+        title: 'Reset your password',
+        subtitle: 'Enter your account email and we’ll send password reset instructions.',
+        action: 'Send reset instructions',
+        success: 'If an account exists for this email, password reset instructions have been sent.',
+        backToLogin: 'Back to login',
+        failed: 'Could not request a password reset'
+      },
+      reset: {
+        title: 'Choose a new password',
+        subtitle: 'Enter a new password for your Relay account.',
+        tokenLabel: 'Reset token',
+        newPassword: 'New password',
+        confirmPassword: 'Confirm new password',
+        action: 'Reset password',
+        success: 'Your password has been reset. You can now log in.',
+        failed: 'Could not reset your password',
+        tokenRequired: 'Enter the reset token from your email.',
+        validation: {
+          required: 'Enter and confirm your new password.',
+          length: 'Password must be between 8 and 128 characters.',
+          mismatch: 'Passwords do not match.'
+        }
       }
     },
     conversations: {
@@ -166,6 +191,7 @@ export const messages = {
         subtitle: 'Увійдіть, щоб продовжити.',
         loginLabel: 'Ім’я користувача або електронна пошта',
         action: 'Увійти',
+        forgotPassword: 'Забули пароль?',
         createAccount: 'Створити обліковий запис',
         failed: 'Не вдалося увійти'
       },
@@ -175,6 +201,30 @@ export const messages = {
         action: 'Створити обліковий запис',
         existingAccount: 'У мене вже є обліковий запис',
         failed: 'Не вдалося зареєструватися'
+      },
+      forgot: {
+        title: 'Скидання пароля',
+        subtitle: 'Введіть електронну адресу облікового запису, і ми надішлемо інструкції зі скидання пароля.',
+        action: 'Надіслати інструкції',
+        success: 'Якщо обліковий запис із цією адресою існує, інструкції зі скидання пароля надіслано.',
+        backToLogin: 'Повернутися до входу',
+        failed: 'Не вдалося надіслати запит на скидання пароля'
+      },
+      reset: {
+        title: 'Створіть новий пароль',
+        subtitle: 'Введіть новий пароль для облікового запису Relay.',
+        tokenLabel: 'Токен скидання',
+        newPassword: 'Новий пароль',
+        confirmPassword: 'Підтвердження нового пароля',
+        action: 'Скинути пароль',
+        success: 'Пароль скинуто. Тепер ви можете увійти.',
+        failed: 'Не вдалося скинути пароль',
+        tokenRequired: 'Введіть токен скидання з електронного листа.',
+        validation: {
+          required: 'Введіть і підтвердьте новий пароль.',
+          length: 'Пароль має містити від 8 до 128 символів.',
+          mismatch: 'Паролі не збігаються.'
+        }
       }
     },
     conversations: {
