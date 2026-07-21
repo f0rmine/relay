@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.config import get_settings
@@ -15,6 +15,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserPublic
 from app.services import auth as auth_service
+from app.services.mail import deliver_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -62,10 +63,14 @@ async def me(current_user: CurrentUser) -> UserPublic:
 @router.post(
     "/forgot-password", response_model=ForgotPasswordResponse, dependencies=[Depends(auth_rate_limit)]
 )
-async def forgot_password(payload: ForgotPasswordRequest, db: DbSession) -> ForgotPasswordResponse:
+async def forgot_password(
+    payload: ForgotPasswordRequest, db: DbSession, background_tasks: BackgroundTasks
+) -> ForgotPasswordResponse:
     reset_token = await auth_service.create_password_reset_token(db, payload.email)
+    if reset_token is not None:
+        background_tasks.add_task(deliver_password_reset_email, str(payload.email), reset_token)
     return ForgotPasswordResponse(
-        detail="If the email exists, a password reset token has been generated.",
+        detail="If the email exists, password reset instructions will be sent.",
         reset_token=reset_token if get_settings().password_reset_token_in_response else None,
     )
 
