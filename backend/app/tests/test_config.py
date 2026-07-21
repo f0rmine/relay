@@ -83,3 +83,20 @@ def test_production_email_requires_transport_security() -> None:
     }
     with pytest.raises(ValidationError, match="requires TLS or STARTTLS"):
         Settings(**production)
+
+    with pytest.raises(ValidationError, match="requires an HTTPS reset URL"):
+        Settings(**{**production, "smtp_starttls": True})
+
+
+def test_enabled_metrics_require_a_strong_bearer_token() -> None:
+    configured = {
+        **settings_kwargs(),
+        "metrics_enabled": True,
+    }
+    with pytest.raises(
+        ValidationError, match="bearer token of at least 32 characters"
+    ):
+        Settings(**configured, metrics_bearer_token="too-short")
+
+    settings = Settings(**configured, metrics_bearer_token="m" * 32)
+    assert settings.metrics_enabled is True
