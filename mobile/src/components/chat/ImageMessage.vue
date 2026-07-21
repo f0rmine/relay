@@ -24,6 +24,10 @@ watch(
   () => props.attachment.id,
   async (attachmentId) => {
     clearObjectUrl();
+    if (attachmentId.startsWith('local-attachment-')) {
+      imageUrl.value = props.attachment.public_url;
+      return;
+    }
     try {
       const blob = await apiBlob(`/attachments/${attachmentId}/download`);
       objectUrl = URL.createObjectURL(blob);

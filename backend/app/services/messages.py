@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, desc, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -74,6 +75,7 @@ async def create_message(
     conversation_id: str,
     text: str | None,
     attachment_ids: list[str] | None = None,
+    client_message_id: str | None = None,
 ) -> Message:
     attachment_ids = attachment_ids or []
     await require_participant(db, conversation_id, user.id)
@@ -109,6 +111,7 @@ async def create_message(
         id=message_id,
         conversation_id=conversation_id,
         sender_id=user.id,
+        client_message_id=client_message_id,
         text=None,
         text_ciphertext=encrypted_text.ciphertext if encrypted_text else None,
         text_nonce=encrypted_text.nonce if encrypted_text else None,
@@ -130,6 +133,43 @@ async def create_message(
     await db.commit()
     await db.refresh(message, attribute_names=["attachments", "reads"])
     return message
+
+
+async def create_message_idempotent(
+    db: AsyncSession,
+    user: User,
+    conversation_id: str,
+    client_message_id: str,
+    text: str | None,
+    attachment_ids: list[str] | None = None,
+) -> tuple[Message, bool]:
+    query = (
+        select(Message)
+        .where(
+            Message.sender_id == user.id,
+            Message.client_message_id == client_message_id,
+        )
+        .options(selectinload(Message.attachments), selectinload(Message.reads))
+    )
+    existing = (await db.scalars(query)).first()
+    if existing is not None:
+        return existing, False
+    try:
+        message = await create_message(
+            db,
+            user,
+            conversation_id,
+            text,
+            attachment_ids,
+            client_message_id=client_message_id,
+        )
+        return message, True
+    except IntegrityError:
+        await db.rollback()
+        existing = (await db.scalars(query)).first()
+        if existing is None:
+            raise
+        return existing, False
 
 
 async def list_messages(

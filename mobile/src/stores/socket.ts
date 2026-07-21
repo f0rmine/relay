@@ -215,6 +215,7 @@ export const useSocketStore = defineStore('socket', {
         this.reconnectAttempt = 0;
         this.clearReconnectTimer();
         this.flushQueue();
+        void messages.flushOutbox();
         this.joinedConversations.forEach((conversationId) => {
           this.send('conversation:join', { conversation_id: conversationId });
           if (reconnected) void messages.fetch(conversationId);

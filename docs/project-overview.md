@@ -527,11 +527,11 @@ Guest перенаправляється на login. Authenticated user із gue
 
 `conversations.ts` відповідає за conversation list, latest message, unread count і presence state.
 
-`messages.ts` відповідає за history, cursors, has-more state, upload, optimistic send, read, delete і typing state.
+`messages.ts` відповідає за history, cursors, has-more state, durable outbox, automatic retry, confirmed-message cache, upload, optimistic send, read, delete і typing state.
 
 `socket.ts` відповідає за WebSocket lifecycle, auth frame, event queue, active rooms, reconnect і dispatch server events у stores.
 
-Після logout conversations і messages повністю очищаються, щоб дані попереднього user не залишалися у пам’яті.
+Після explicit logout conversations, messages та локальні IndexedDB records цього user повністю очищаються. Після тимчасового завершення session outbox зберігається окремо за user ID, щоб запити можна було продовжити після повторного входу в той самий account.
 
 ## 21. Frontend API і token handling
 
@@ -565,17 +565,21 @@ Manual logout/disconnect вимикає reconnect.
 
 Після `auth:ok` queued events надсилаються, active conversations повторно join-яться, а після reconnect active history оновлюється.
 
-Text/file input очищається тільки після того, як local send був прийнятий WebSocket store.
+Text/file input очищається тільки після успішного durable запису request у IndexedDB outbox.
 
-Якщо WebSocket не готовий, `message:send` не створює false optimistic success і UI показує помилку realtime unavailable.
+Кожне outgoing message отримує стабільний `client_message_id`. Backend має unique constraint за sender і client ID, тому повторний REST або WebSocket request повертає вже створене повідомлення без дублювання fanout та push.
 
-Optimistic message отримує ID `pending-{request_id}`.
+Optimistic message отримує ID `pending-{client_message_id}` та delivery state `queued`, `sending` або `failed`.
 
-Після `message:new` із відповідним request ID pending message замінюється persistent message.
+Attachment до відправлення зберігається як Blob в IndexedDB. Після відновлення мережі client спочатку завантажує attachment, зберігає server attachment ID у тому самому outbox record, а потім створює message через `POST /messages`.
 
-Після server `error` pending message видаляється.
+Після REST response або `message:new` із відповідним client ID pending message замінюється persistent message, а outbox record і локальний attachment Blob видаляються.
 
-Через 15 секунд без acknowledgement pending message видаляється і UI показує send failure.
+Transient network/server failures використовують exponential backoff із jitter. Permanent 4xx failure залишається у chat із діями retry та remove.
+
+Flush запускається після login restore, WebSocket `auth:ok`, browser online event, Capacitor network status recovery та application resume. Android не гарантує довільне background execution після повного завершення process, тому durable outbox гарантує збереження request, а delivery продовжується у наступне дозволене lifecycle window.
+
+Останні 200 confirmed messages кожної відкритої conversation кешуються окремо від outbox для offline reading. Локальний cache ізольований app/WebView sandbox, але не є E2EE.
 
 Typing events не накопичуються у stale queue.
 
@@ -731,7 +735,7 @@ Backend test command — `./scripts/backend-test.sh`.
 
 Script створює `backend/.venv`, встановлює dev dependencies, запускає pytest і Ruff.
 
-У проєкті є 50 backend tests.
+У проєкті є 52 backend tests.
 
 Backend tests покривають registration, login, protected API, refresh rotation, legacy token compatibility, password reset, production configuration guards, distributed rate limit, multi-instance presence, profile, search, avatar replacement і validation, private conversation, batched latest-message/unread queries, messages, read receipts, soft delete, pagination, upload cleanup/validation, push token lifecycle, background FCM scheduling, FCM errors, readiness endpoint, WebSocket authentication/broadcast/persistence/delete, stale connection cleanup, seed-script safety та encryption/key rotation.
 
@@ -739,9 +743,9 @@ Backend tests використовують async SQLite і test doubles для R
 
 Frontend test command — `cd mobile` та `npm test`.
 
-У проєкті є 6 frontend tests у трьох files.
+У проєкті є 10 frontend tests у чотирьох files.
 
-Frontend tests перевіряють translation key parity, optimistic acknowledgement, rejected pending cleanup, timeout cleanup і базові security invariants HTML/Capacitor configuration.
+Frontend tests перевіряють translation key parity, durable enqueue до network attempt, idempotency key reuse, rejected-message retry, restart restoration, IndexedDB attachment bytes, confirmed-history cache filtering і базові security invariants HTML/Capacitor configuration.
 
 Frontend type-check і production build виконуються через `npm run build`.
 

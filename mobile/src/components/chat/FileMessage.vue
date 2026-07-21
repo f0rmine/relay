@@ -19,6 +19,10 @@ const { t } = useI18n();
 
 async function openFile() {
   if (loading.value) return;
+  if (props.attachment.id.startsWith('local-attachment-')) {
+    window.open(props.attachment.public_url, '_blank', 'noopener,noreferrer');
+    return;
+  }
   loading.value = true;
   try {
     const blob = await apiBlob(`/attachments/${props.attachment.id}/download`);

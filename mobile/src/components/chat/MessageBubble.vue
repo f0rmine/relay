@@ -2,7 +2,7 @@
   <div class="row" :class="{ own }">
     <div
       class="bubble"
-      :class="{ pending: isPending, deleted: message.deleted_at }"
+      :class="{ pending: isPending, failed: isFailed, deleted: message.deleted_at }"
       @touchstart="startPress"
       @touchend="cancelPress"
       @touchcancel="cancelPress"
@@ -21,7 +21,9 @@
       </template>
       <div class="time">
         {{ d(new Date(message.created_at), 'time') }}
-        <span v-if="isPending">{{ t('chat.sending') }}</span>
+        <span v-if="message.delivery_state === 'queued'">{{ t('chat.queued') }}</span>
+        <span v-else-if="message.delivery_state === 'sending'">{{ t('chat.sending') }}</span>
+        <span v-else-if="message.delivery_state === 'failed'">{{ t('chat.failed') }}</span>
         <span v-else-if="own">{{ message.read_by.length ? '✓✓' : '✓' }}</span>
       </div>
     </div>
@@ -44,32 +46,30 @@ import FileMessage from './FileMessage.vue';
 import ImageMessage from './ImageMessage.vue';
 
 const props = defineProps<{ message: Message; own: boolean; senderName: string }>();
-const emit = defineEmits<{ delete: [] }>();
+const emit = defineEmits<{ delete: []; retry: []; remove: [] }>();
 const actionsOpen = ref(false);
 let pressTimer: number | undefined;
 const { d, t } = useI18n();
 
 const isPending = computed(() => props.message.id.startsWith('pending-'));
+const isFailed = computed(() => props.message.delivery_state === 'failed');
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
-const actionButtons = computed(() => [
-  {
-    text: t('chat.deleteEveryone'),
-    role: 'destructive',
-    handler: () => emit('delete')
-  },
-  {
-    text: t('common.cancel'),
-    role: 'cancel'
-  }
+const actionButtons = computed(() => isFailed.value ? [
+  { text: t('chat.retry'), handler: () => emit('retry') },
+  { text: t('chat.removeFailed'), role: 'destructive', handler: () => emit('remove') },
+  { text: t('common.cancel'), role: 'cancel' }
+] : [
+  { text: t('chat.deleteEveryone'), role: 'destructive', handler: () => emit('delete') },
+  { text: t('common.cancel'), role: 'cancel' }
 ]);
 
 function openActions() {
-  if (!canDelete.value) return;
+  if (!canDelete.value && !isFailed.value) return;
   actionsOpen.value = true;
 }
 
 function startPress() {
-  if (!canDelete.value) return;
+  if (!canDelete.value && !isFailed.value) return;
   cancelPress();
   pressTimer = window.setTimeout(openActions, 500);
 }
@@ -105,6 +105,10 @@ function cancelPress() {
 }
 .bubble.pending {
   opacity: 0.7;
+}
+.bubble.failed {
+  border: 1px solid #e66b6b;
+  opacity: 1;
 }
 .bubble.deleted {
   background: rgba(78, 96, 116, 0.82);

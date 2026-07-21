@@ -13,6 +13,8 @@
         :has-more="messages.hasMore[conversationId]"
         @older="messages.fetch(conversationId, true)"
         @delete-message="deleteMessage"
+        @retry-message="messages.retry"
+        @remove-pending="messages.removePending"
       />
     </ion-content>
     <MessageInput :sending="sending" @send="send" @typing="typing" />
@@ -100,12 +102,7 @@ async function send(
   error.value = '';
   let accepted = false;
   try {
-    if (!socket.canSendRealtime()) {
-      socket.connect();
-      throw new Error(t('chat.realtimeUnavailable'));
-    }
-    const attachments = file ? [await messages.upload(file, conversationId.value)] : [];
-    messages.send(conversationId.value, text, attachments);
+    await messages.enqueue(conversationId.value, text, file);
     accepted = true;
   } catch (err: unknown) {
     error.value = displayError(err, t('chat.sendFailed'));

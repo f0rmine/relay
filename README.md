@@ -19,10 +19,12 @@ Relay is a real-time messenger built around a FastAPI backend and an Android-fir
 - Register/login/logout, access tokens, refresh tokens, protected routes
 - Password reset token generation API
 - User search by username, display name, or email
-- Generated placeholder avatars and avatar upload
+- Local initial avatars and avatar upload
 - Private one-to-one conversations only for v1
 - Conversation list with latest message and unread count
 - Message history with cursor pagination
+- Durable offline outbox with automatic retry, attachment staging, and idempotent delivery
+- Local confirmed-message cache for offline chat history
 - Realtime send/delete/read/typing/presence events over WebSockets
 - File/image upload with MIME and size validation
 - AES-256-GCM encryption at rest for new message text and chat attachments
@@ -329,6 +331,7 @@ The script prints only safe metadata such as `project_id` and `client_email`, pl
 - `GET /conversations/{conversation_id}`
 - `GET /conversations/{conversation_id}/messages?cursor=&limit=`
 - `POST /conversations/{conversation_id}/read`
+- `POST /messages`
 - `DELETE /messages/{message_id}`
 - `POST /attachments/upload`
 - `GET /attachments/{attachment_id}`
@@ -400,6 +403,7 @@ Redis data is temporary and safe to lose.
 - Access and refresh tokens use separate secrets.
 - Refresh tokens are stored hashed in PostgreSQL.
 - Native Android stores access and refresh tokens in Android Keystore-backed secure storage. Browser development uses a `localStorage` fallback; a public browser deployment should move refresh tokens to HttpOnly secure cookies for stronger XSS isolation.
+- Pending sends, staged attachment blobs, and the latest confirmed chat history are stored per user in IndexedDB. Native builds receive the WebView/app sandbox protection; this local cache is not end-to-end encrypted and should be treated like other on-device messenger data.
 - New message text and attachment bytes are encrypted at rest with AES-256-GCM using a unique random nonce per record.
 - Encryption keys are versioned. New records use `ENCRYPTION_ACTIVE_KEY_ID`; old key IDs must remain in `ENCRYPTION_KEYS` until their records are re-encrypted.
 - Auth-sensitive endpoints use a shared Redis per-IP/path rate limiter.

@@ -8,6 +8,8 @@
       :own="message.sender_id === currentUserId"
       :sender-name="senderName(message.sender_id)"
       @delete="$emit('delete-message', message.id)"
+      @retry="$emit('retry-message', message.client_message_id || '')"
+      @remove="$emit('remove-pending', message.client_message_id || '')"
     />
     <TypingIndicator :visible="typing" />
   </div>
@@ -28,7 +30,12 @@ const props = defineProps<{
   typing: boolean;
   hasMore?: boolean;
 }>();
-const emit = defineEmits<{ older: []; 'delete-message': [messageId: string] }>();
+const emit = defineEmits<{
+  older: [];
+  'delete-message': [messageId: string];
+  'retry-message': [clientMessageId: string];
+  'remove-pending': [clientMessageId: string];
+}>();
 const scroller = ref<HTMLElement | null>(null);
 const preservingOlderScroll = ref(false);
 const { t } = useI18n();
