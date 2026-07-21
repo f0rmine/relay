@@ -54,3 +54,32 @@ def test_production_settings_reject_debug_reset_tokens_and_defaults() -> None:
 def test_cors_settings_require_an_explicit_allowlist() -> None:
     with pytest.raises(ValidationError, match="explicit allowlist"):
         Settings(**settings_kwargs(), cors_origins=["*"])
+
+
+def test_password_reset_email_settings_require_complete_secure_configuration() -> None:
+    with pytest.raises(ValidationError, match="SMTP_HOST and SMTP_FROM_ADDRESS"):
+        Settings(**settings_kwargs(), password_reset_email_enabled=True)
+
+    with pytest.raises(ValidationError, match="cannot both be enabled"):
+        Settings(**settings_kwargs(), smtp_use_tls=True, smtp_starttls=True)
+
+    with pytest.raises(ValidationError, match="must be configured together"):
+        Settings(**settings_kwargs(), smtp_username="relay", smtp_password=None)
+
+
+def test_production_email_requires_transport_security() -> None:
+    production = {
+        **settings_kwargs(),
+        "environment": "production",
+        "database_url": "postgresql+asyncpg://relay:secret@postgres:5432/relay",
+        "jwt_secret": "production-access-secret-with-at-least-32-characters",
+        "jwt_refresh_secret": "production-refresh-secret-with-at-least-32-characters",
+        "cors_origins": ["https://relay.example.com"],
+        "password_reset_token_in_response": False,
+        "password_reset_email_enabled": True,
+        "smtp_host": "smtp.example.com",
+        "smtp_from_address": "relay@example.com",
+        "smtp_starttls": False,
+    }
+    with pytest.raises(ValidationError, match="requires TLS or STARTTLS"):
+        Settings(**production)
