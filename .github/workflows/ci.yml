@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend dependencies
+        run: python -m pip install -e "backend[dev]"
+      - name: Run backend tests
+        working-directory: backend
+        run: pytest
+      - name: Run Ruff
+        working-directory: backend
+        run: ruff check app
+
+  mobile:
+    name: Mobile tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  security:
+    name: Dependency and code security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Prepare audit dependencies
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install -e "backend[dev]"
+          npm ci --prefix mobile
+      - run: ./scripts/security-audit.sh
+
+  configuration:
+    name: Configuration and shell validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      POSTGRES_DB: relay
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: ci-only-postgres-password
+      DATABASE_URL: postgresql+asyncpg://relay:ci-only-postgres-password@postgres:5432/relay
+      JWT_SECRET: ci-only-access-secret-at-least-32-bytes-long
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-at-least-32-bytes-long
+      CORS_ORIGINS: https://relay.example.test
+      ENCRYPTION_ACTIVE_KEY_ID: ci
+      ENCRYPTION_KEYS: '{"ci":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose files
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+      - name: Check shell syntax
+        run: find scripts backend -type f -name '*.sh' -print0 | xargs -0 -r bash -n
+
