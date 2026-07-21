@@ -3,6 +3,7 @@ import json
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -24,7 +25,7 @@ from app.schemas.ws import (
     WebSocketEnvelope,
 )
 from app.services.conversations import latest_message, mark_conversation_read, require_participant
-from app.services.messages import create_message, delete_message_for_everyone
+from app.services.messages import create_message_idempotent, delete_message_for_everyone
 from app.services.presence import clear_typing, set_offline, set_online, set_typing
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
@@ -192,14 +193,22 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
 
     if envelope.type == "message:send":
         payload = MessageSendPayload.model_validate(envelope.payload)
-        message = await create_message(
-            db, user, payload.conversation_id, payload.text, payload.attachment_ids
+        client_message_id = payload.client_message_id or envelope.request_id or str(uuid4())
+        message, created = await create_message_idempotent(
+            db,
+            user,
+            payload.conversation_id,
+            client_message_id,
+            payload.text,
+            payload.attachment_ids,
         )
+        message_payload = serialize_message(message)
+        message_payload["request_id"] = client_message_id
+        if not created:
+            await websocket.send_json({"type": "message:new", "payload": message_payload})
+            return
         conversation = await require_participant(db, payload.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
-        message_payload = serialize_message(message)
-        if envelope.request_id:
-            message_payload["request_id"] = envelope.request_id
         await manager.broadcast_to_users(redis, participants, "message:new", message_payload)
         await manager.broadcast_to_users(
             redis,

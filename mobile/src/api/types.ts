@@ -24,6 +24,7 @@ export interface Message {
   id: string;
   conversation_id: string;
   sender_id: string;
+  client_message_id?: string | null;
   text?: string | null;
   created_at: string;
   updated_at: string;
@@ -33,6 +34,7 @@ export interface Message {
   attachments: Attachment[];
   read_by: string[];
   request_id?: string;
+  delivery_state?: 'queued' | 'sending' | 'failed';
 }
 
 export interface Conversation {

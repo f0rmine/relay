@@ -19,13 +19,19 @@ from app.core.database import Base
 
 class Message(Base):
     __tablename__ = "messages"
-    __table_args__ = (Index("ix_messages_conversation_created", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+        UniqueConstraint(
+            "sender_id", "client_message_id", name="uq_messages_sender_client_message"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
     sender_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client_message_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     text_nonce: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

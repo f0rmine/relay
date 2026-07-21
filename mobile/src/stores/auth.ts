@@ -6,6 +6,7 @@ import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
 import { initPushNotifications, unregisterPushNotifications } from '@/services/push';
+import { clearUserMessageStorage } from '@/services/message-storage';
 import {
   clearAuthTokens,
   getAuthTokens,
@@ -75,7 +76,7 @@ export const useAuthStore = defineStore('auth', {
       });
       window.addEventListener('relay:auth-expired', () => {
         useSocketStore().disconnect();
-        void this.clear().catch(() => undefined);
+        void this.clear(true).catch(() => undefined);
       });
     },
     async restore() {
@@ -87,11 +88,12 @@ export const useAuthStore = defineStore('auth', {
           await this.syncFromStorage();
           if (!this.accessToken) return;
           await this.setUser(await apiFetch<User>('/auth/me'));
+          await useMessagesStore().restoreLocal(this.user!.id);
           void useSocketStore().connect();
           void initPushNotifications();
         } catch (error) {
           if (error instanceof ApiError && error.status === 401) {
-            await this.clear();
+            await this.clear(true);
           }
         } finally {
           this.restored = true;
@@ -109,6 +111,7 @@ export const useAuthStore = defineStore('auth', {
           body: JSON.stringify({ login, password })
         });
         await this.persist(response);
+        await useMessagesStore().restoreLocal(response.user.id);
         void useSocketStore().connect();
         void initPushNotifications();
       } finally {
@@ -123,6 +126,7 @@ export const useAuthStore = defineStore('auth', {
           body: JSON.stringify({ username, display_name, email, password })
         });
         await this.persist(response);
+        await useMessagesStore().restoreLocal(response.user.id);
         void useSocketStore().connect();
         void initPushNotifications();
       } finally {
@@ -157,14 +161,18 @@ export const useAuthStore = defineStore('auth', {
       useSocketStore().disconnect();
       await this.clear();
     },
-    async clear() {
+    async clear(preserveMessageStorage = false) {
+      const previousUserId = this.user?.id;
+      useConversationsStore().reset();
+      useMessagesStore().reset();
       this.user = null;
       this.accessToken = null;
       this.refreshToken = null;
       this.restored = true;
       await Promise.all([clearAuthTokens(), setStoredAuthUser(null)]);
-      useConversationsStore().reset();
-      useMessagesStore().reset();
+      if (previousUserId && !preserveMessageStorage) {
+        await clearUserMessageStorage(previousUserId);
+      }
     }
   }
 });

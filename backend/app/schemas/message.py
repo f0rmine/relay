@@ -8,6 +8,7 @@ from app.schemas.common import OrmModel
 
 class MessageCreate(BaseModel):
     conversation_id: str
+    client_message_id: str = Field(min_length=1, max_length=100)
     text: str | None = Field(default=None, max_length=4000)
     attachment_ids: list[str] = Field(default_factory=list, max_length=5)
 
@@ -24,6 +25,7 @@ class MessageOut(OrmModel):
     id: str
     conversation_id: str
     sender_id: str
+    client_message_id: str | None = None
     text: str | None
     created_at: datetime
     updated_at: datetime
