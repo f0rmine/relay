@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   IonBackButton,
@@ -81,7 +81,7 @@ import { resetTokenFromQuery, validateNewPassword } from '@/utils/password-recov
 
 const route = useRoute();
 const router = useRouter();
-const queryToken = resetTokenFromQuery(route.query.token);
+const queryToken = computed(() => resetTokenFromQuery(route.query.token));
 const pastedToken = ref('');
 const password = ref('');
 const confirmation = ref('');
@@ -91,7 +91,7 @@ const { t } = useI18n();
 
 async function submit() {
   error.value = '';
-  const token = queryToken || pastedToken.value.trim();
+  const token = queryToken.value || pastedToken.value.trim();
   if (!token) {
     error.value = t('auth.reset.tokenRequired');
     return;
