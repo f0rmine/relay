@@ -17,6 +17,7 @@ import { useAuthStore } from './stores/auth';
 import { useMessagesStore } from './stores/messages';
 import { useSocketStore } from './stores/socket';
 import { i18n, translate } from './i18n';
+import { registerPasswordRecoveryLinks } from './services/password-recovery-links';
 
 const pinia = createPinia();
 const app = createApp(App).use(pinia).use(i18n).use(IonicVue).use(router);
@@ -35,6 +36,8 @@ void Network.addListener('networkStatusChange', (status) => {
 });
 void CapacitorApp.addListener('resume', resumeDelivery);
 window.addEventListener('online', resumeDelivery);
+
+registerPasswordRecoveryLinks(CapacitorApp, router);
 
 router.isReady().then(() => {
   app.mount('#app');

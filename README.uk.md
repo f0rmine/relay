@@ -17,7 +17,7 @@ Relay — це месенджер реального часу з бекендо�
 ## Можливості
 
 - Реєстрація/вхід/вихід, токени доступу, токени оновлення, захищені маршрути
-- Відновлення пароля через SMTP з екранами запиту/скидання та безпечними щодо enumeration відповідями
+- Відновлення пароля через SMTP з екранами запиту/скидання, native Android deep links і безпечними щодо enumeration відповідями
 - Пошук користувачів за іменем користувача, відображуваним ім'ям або електронною адресою
 - Локальні аватари з ініціалами та завантаження аватара
 - У v1 лише приватні розмови один на один
@@ -140,6 +140,16 @@ SMTP_STARTTLS=true
 
 Forgot-password response однакова для відомих і невідомих адрес. SMTP виконується як in-process background task: помилки delivery не розкривають існування account або secrets, але crash процесу може втратити email у процесі надсилання. Production mode забороняє SMTP без TLS/STARTTLS і reset URL без HTTPS. Поза контрольованою локальною розробкою залишайте `PASSWORD_RESET_TOKEN_IN_RESPONSE=false`.
 
+Android обробляє password-reset links як під час cold start, так і у вже запущеному застосунку. Для production HTTPS App Link зберіть APK із тим самим host, який використано в `PASSWORD_RESET_URL`:
+
+```bash
+CAPACITOR_APP_LINK_HOST=relay.example.com \
+CAPACITOR_ALLOW_CLEARTEXT=false \
+./scripts/android-build.sh
+```
+
+HTTPS host повинен віддавати коректний `/.well-known/assetlinks.json` для package `com.relay.messenger` і signing certificate встановленого APK. Без domain verification Android відкриє web client. Лише для локального native testing можна задати `PASSWORD_RESET_URL=relay://reset-password`; build завжди реєструє цей custom-scheme fallback. Інший застосунок може зареєструвати такий самий custom scheme, тому production має використовувати verified HTTPS App Links.
+
 ### Monitoring і CI
 
 `GET /health` є liveness check, а `GET /health/ready` перевіряє PostgreSQL, Redis і Pub/Sub subscriber. Для process-local Prometheus-сумісних HTTP counters та latency histograms задайте:
@@ -225,7 +235,7 @@ npm install
 npm test
 ```
 
-13 тестів мобільного застосунку перевіряють однаковий набір ключів перекладу, validation password recovery, постійну offline delivery/cache поведінку, узгодження оптимістичних повідомлень і security configuration web/Capacitor.
+22 тести мобільного застосунку перевіряють translation parity, password-recovery/deep-link routing, генерацію Android manifest, постійну offline delivery/cache поведінку, узгодження оптимістичних повідомлень і security configuration web/Capacitor.
 
 ## Налаштування мобільного застосунку
 
@@ -283,13 +293,15 @@ npm run assets:android
 
 Скрипт складання проєкту запускає цю генерацію автоматично, якщо source-файл іконки існує.
 
-`npm install` також застосовує вузький compatibility patch для Capacitor CLI 6 і зафіксованої з міркувань безпеки `tar@7.5.16`. Залишайте `mobile/scripts/patch-capacitor-cli.mjs`, доки Capacitor і всі native plugins не буде оновлено разом; script явно завершується помилкою, якщо код майбутнього CLI більше не відповідає очікуваній структурі.
+`npm install` також застосовує вузький compatibility patch для Capacitor CLI 6 і зафіксованої з міркувань безпеки `tar@7.5.22`. Transitive `brace-expansion` і `postcss` також pinned до виправлених releases. Залишайте `mobile/scripts/patch-capacitor-cli.mjs`, доки Capacitor і всі native plugins не буде оновлено разом; script явно завершується помилкою, якщо код майбутнього CLI більше не відповідає очікуваній структурі.
 
 `android-build.sh` створює LAN-friendly debug APK і явно дозволяє cleartext traffic. Для збірки, що працює лише через HTTPS/WSS, вимкніть його; Android backup залишається вимкненим в обох режимах:
 
 ```bash
 CAPACITOR_ALLOW_CLEARTEXT=false ./scripts/android-build.sh
 ```
+
+Android configuration step також додає password-reset intent filters і формує `versionName`/`versionCode` з `mobile/package.json`. Для verified HTTPS App Link задайте `CAPACITOR_APP_LINK_HOST` як hostname без scheme або path.
 
 ```bash
 cd mobile

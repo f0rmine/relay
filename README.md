@@ -17,7 +17,7 @@ Relay is a real-time messenger built around a FastAPI backend and an Android-fir
 ## Features
 
 - Register/login/logout, access tokens, refresh tokens, protected routes
-- SMTP password recovery with forgot/reset screens and enumeration-safe responses
+- SMTP password recovery with forgot/reset screens, native Android deep links, and enumeration-safe responses
 - User search by username, display name, or email
 - Local initial avatars and avatar upload
 - Private one-to-one conversations only for v1
@@ -140,6 +140,16 @@ SMTP_STARTTLS=true
 
 The forgot-password response is identical for known and unknown addresses. SMTP runs as an in-process background task; delivery failures do not expose account existence or secrets, but a process crash can lose an in-flight email. Production rejects unencrypted SMTP delivery and non-HTTPS reset URLs. Keep `PASSWORD_RESET_TOKEN_IN_RESPONSE=false` outside controlled local development.
 
+Android handles both cold-start and already-running password-reset links. For a production HTTPS App Link, build with the same host used by `PASSWORD_RESET_URL`:
+
+```bash
+CAPACITOR_APP_LINK_HOST=relay.example.com \
+CAPACITOR_ALLOW_CLEARTEXT=false \
+./scripts/android-build.sh
+```
+
+The HTTPS host must serve a valid `/.well-known/assetlinks.json` for package `com.relay.messenger` and the signing certificate used by the installed APK. Without domain verification Android opens the web client instead. For local native testing only, set `PASSWORD_RESET_URL=relay://reset-password`; the build always registers that custom-scheme fallback. Custom schemes can be claimed by another app, so production should use verified HTTPS App Links.
+
 ### Monitoring and CI
 
 `GET /health` is the liveness check and `GET /health/ready` verifies PostgreSQL, Redis, and the Pub/Sub subscriber. To expose process-local Prometheus-compatible HTTP counters and latency histograms, set:
@@ -225,7 +235,7 @@ npm install
 npm test
 ```
 
-The 13 mobile tests verify translation parity, password-recovery validation, durable offline delivery/cache behavior, optimistic-message reconciliation, and the web/Capacitor security configuration.
+The 22 mobile tests verify translation parity, password-recovery/deep-link routing, Android manifest generation, durable offline delivery/cache behavior, optimistic-message reconciliation, and the web/Capacitor security configuration.
 
 ## Mobile Setup
 
@@ -283,13 +293,15 @@ npm run assets:android
 
 The project build script runs this generation automatically when the source icon exists.
 
-`npm install` also applies a narrow Capacitor CLI 6 compatibility patch for the security-pinned `tar@7.5.16`. Keep `mobile/scripts/patch-capacitor-cli.mjs` until Capacitor and all native plugins are upgraded together; the script fails clearly if a future CLI no longer matches the expected code.
+`npm install` also applies a narrow Capacitor CLI 6 compatibility patch for the security-pinned `tar@7.5.22`. Transitive `brace-expansion` and `postcss` versions are likewise pinned to patched releases. Keep `mobile/scripts/patch-capacitor-cli.mjs` until Capacitor and all native plugins are upgraded together; the script fails clearly if a future CLI no longer matches the expected code.
 
 `android-build.sh` builds a LAN-friendly debug APK and enables cleartext traffic explicitly. For an HTTPS/WSS build, disable it explicitly; Android backup remains disabled in both modes:
 
 ```bash
 CAPACITOR_ALLOW_CLEARTEXT=false ./scripts/android-build.sh
 ```
+
+The Android configuration step also installs the password-reset intent filters and derives `versionName`/`versionCode` from `mobile/package.json`. Set `CAPACITOR_APP_LINK_HOST` to a bare hostname when building a verified HTTPS App Link.
 
 ```bash
 cd mobile
