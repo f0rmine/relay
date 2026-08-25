@@ -60,7 +60,7 @@ async def save_avatar(db: AsyncSession, user: User, file: UploadFile) -> User:
         sniffed_type = "image/jpeg"
     elif data.startswith(b"\x89PNG\r\n\x1a\n"):
         sniffed_type = "image/png"
-    elif data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+    elif data.startswith((b"GIF87a", b"GIF89a")):
         sniffed_type = "image/gif"
     elif len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         sniffed_type = "image/webp"

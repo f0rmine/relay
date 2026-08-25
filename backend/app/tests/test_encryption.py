@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.core.encryption import DecryptionError, ENCRYPTION_VERSION, EncryptionKeyring
+from app.core.encryption import ENCRYPTION_VERSION, DecryptionError, EncryptionKeyring
 from app.models.attachment import Attachment
 from app.models.message import Message
 from app.services.attachments import read_attachment_bytes

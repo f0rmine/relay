@@ -1,3 +1,4 @@
+from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, UploadFile, status
@@ -5,8 +6,8 @@ from fastapi.responses import Response
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.attachment import AttachmentOut
-from app.services.conversations import require_participant
 from app.services.attachments import read_attachment_bytes, require_attachment_access, save_upload
+from app.services.conversations import require_participant
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -15,8 +16,8 @@ router = APIRouter(prefix="/attachments", tags=["attachments"])
 async def upload_attachment(
     current_user: CurrentUser,
     db: DbSession,
-    file: UploadFile = File(...),
-    conversation_id: str | None = Form(default=None),
+    file: Annotated[UploadFile, File(...)],
+    conversation_id: Annotated[str | None, Form()] = None,
 ) -> AttachmentOut:
     if conversation_id:
         await require_participant(db, conversation_id, current_user.id)

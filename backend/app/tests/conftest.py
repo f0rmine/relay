@@ -19,16 +19,16 @@ os.environ.setdefault(
     '{"test-v1":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}',
 )
 
-from app import models  # noqa: E402,F401
-from app.api import deps as deps_module  # noqa: E402
-from app.api.routes import conversations as conversations_route  # noqa: E402
-from app.api.routes import messages as messages_route  # noqa: E402
-from app.api.routes import users as users_route  # noqa: E402
-from app.core.database import Base, get_db  # noqa: E402
-from app.core.rate_limit import auth_rate_limit, clear_auth_rate_limit  # noqa: E402
-from app.main import app  # noqa: E402
-from app.services import attachments as attachments_module  # noqa: E402
-from app.services import auth as auth_service_module  # noqa: E402
+from app import models  # noqa: F401
+from app.api import deps as deps_module
+from app.api.routes import conversations as conversations_route
+from app.api.routes import messages as messages_route
+from app.api.routes import users as users_route
+from app.core.database import Base, get_db
+from app.core.rate_limit import auth_rate_limit, clear_auth_rate_limit
+from app.main import app
+from app.services import attachments as attachments_module
+from app.services import auth as auth_service_module
 
 
 class FakeRedis:
