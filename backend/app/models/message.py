@@ -22,7 +22,10 @@ class Message(Base):
     __table_args__ = (
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
         UniqueConstraint(
-            "sender_id", "client_message_id", name="uq_messages_sender_client_message"
+            "sender_id",
+            "conversation_id",
+            "client_message_id",
+            name="uq_messages_sender_conversation_client_message",
         ),
     )
 

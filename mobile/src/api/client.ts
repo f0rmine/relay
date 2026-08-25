@@ -42,6 +42,7 @@ const backendErrorKeys: Record<string, string> = {
   'File extension does not match file type': 'api.errors.fileTypeMismatch',
   'Empty file upload': 'api.errors.emptyFile',
   'File is too large': 'api.errors.fileTooLarge',
+  'Upload quota exceeded': 'api.errors.uploadQuota',
   'Image content does not match file type': 'api.errors.imageTypeMismatch',
   'Filename is too long': 'api.errors.filenameTooLong',
   'Filename contains invalid characters': 'api.errors.invalidFilename',
@@ -129,9 +130,17 @@ async function refreshTokens(): Promise<TokenResponse | null> {
   return refreshPromise;
 }
 
-async function safeFetch(path: string, options: RequestInit): Promise<Response> {
+const DEFAULT_TIMEOUT_MS = 20_000;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+async function safeFetch(
+  path: string,
+  options: RequestInit & { timeoutMs?: number }
+): Promise<Response> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
+  const signal = fetchOptions.signal ?? AbortSignal.timeout(timeoutMs);
   try {
-    return await fetch(apiUrl(path), options);
+    return await fetch(apiUrl(path), { ...fetchOptions, signal });
   } catch {
     throw new ApiError(
       0,
@@ -145,7 +154,10 @@ export function displayError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  options: RequestInit & { timeoutMs?: number } = {}
+): Promise<T> {
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
@@ -180,7 +192,7 @@ export async function apiBlob(path: string): Promise<Blob> {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  let response = await safeFetch(path, { headers });
+  let response = await safeFetch(path, { headers, timeoutMs: DOWNLOAD_TIMEOUT_MS });
   if (response.status === 401) {
     const refreshed = await refreshTokens();
     if (refreshed) {

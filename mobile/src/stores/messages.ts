@@ -23,14 +23,27 @@ interface MessagesState {
 }
 
 const previewUrls = new Map<string, string>();
+const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const inflightFetches = new Set<string>();
 let flushPromise: Promise<void> | null = null;
+let flushAgain = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryAt = 0;
 let lifecycleEpoch = 0;
+const TYPING_EXPIRY_MS = 7000;
 
 function nextBackoff(attemptCount: number) {
   const base = Math.min(1000 * 2 ** Math.max(0, attemptCount - 1), 30000);
   return base + Math.floor(Math.random() * Math.max(250, base * 0.25));
+}
+
+function mergeMessages(primary: Message[], secondary: Message[]): Message[] {
+  const seen = new Set<string>();
+  return [...primary, ...secondary].filter((message) => {
+    if (!message.id || seen.has(message.id)) return false;
+    seen.add(message.id);
+    return true;
+  });
 }
 
 function isPermanentFailure(error: unknown) {
@@ -46,9 +59,11 @@ function releasePreview(id: string) {
 
 function localAttachments(entry: OutboxEntry): Attachment[] {
   if (!entry.attachment) return [];
-  releasePreview(entry.id);
-  const publicUrl = URL.createObjectURL(entry.attachment.data);
-  previewUrls.set(entry.id, publicUrl);
+  let publicUrl = previewUrls.get(entry.id);
+  if (!publicUrl) {
+    publicUrl = URL.createObjectURL(entry.attachment.data);
+    previewUrls.set(entry.id, publicUrl);
+  }
   return [{
     id: `local-attachment-${entry.id}`,
     uploader_id: entry.userId,
@@ -95,6 +110,9 @@ export const useMessagesStore = defineStore('messages', {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
       retryAt = 0;
+      typingTimers.forEach((timer) => clearTimeout(timer));
+      typingTimers.clear();
+      inflightFetches.clear();
       previewUrls.forEach((url) => URL.revokeObjectURL(url));
       previewUrls.clear();
       this.byConversation = {};
@@ -129,6 +147,9 @@ export const useMessagesStore = defineStore('messages', {
     },
     async fetch(conversationId: string, older = false) {
       await this.restoreConversation(conversationId);
+      const fetchKey = `${conversationId}:${older ? 'older' : 'initial'}`;
+      if (inflightFetches.has(fetchKey)) return;
+      inflightFetches.add(fetchKey);
       this.loading = true;
       try {
         const cursor = older ? this.cursors[conversationId] : null;
@@ -139,16 +160,19 @@ export const useMessagesStore = defineStore('messages', {
           has_more: boolean;
         }>(`/conversations/${conversationId}/messages${params}`);
         const ascending = response.items.reverse();
-        const local = (this.byConversation[conversationId] || []).filter(
-          (message) => Boolean(message.delivery_state)
-        );
+        const existing = this.byConversation[conversationId] || [];
+        const fetchedIds = new Set(ascending.map((item) => item.id));
         this.byConversation[conversationId] = older
-          ? [...ascending, ...(this.byConversation[conversationId] || [])]
-          : [...ascending, ...local];
+          ? mergeMessages(ascending, existing)
+          : mergeMessages(
+              ascending,
+              existing.filter((item) => !fetchedIds.has(item.id))
+            );
         this.cursors[conversationId] = response.next_cursor;
         this.hasMore[conversationId] = response.has_more;
         this.persistConversation(conversationId);
       } finally {
+        inflightFetches.delete(fetchKey);
         this.loading = false;
       }
     },
@@ -156,7 +180,11 @@ export const useMessagesStore = defineStore('messages', {
       const form = new FormData();
       form.append('file', file);
       if (conversationId) form.append('conversation_id', conversationId);
-      return apiFetch<Attachment>('/attachments/upload', { method: 'POST', body: form });
+      return apiFetch<Attachment>('/attachments/upload', {
+        method: 'POST',
+        body: form,
+        timeoutMs: 120_000
+      });
     },
     async enqueue(conversationId: string, text: string, file: File | null = null) {
       const auth = useAuthStore();
@@ -255,7 +283,10 @@ export const useMessagesStore = defineStore('messages', {
       }
     },
     async flushOutbox() {
-      if (flushPromise) return flushPromise;
+      if (flushPromise) {
+        flushAgain = true;
+        return flushPromise;
+      }
       const auth = useAuthStore();
       if (!auth.user || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
       const userId = auth.user.id;
@@ -291,6 +322,10 @@ export const useMessagesStore = defineStore('messages', {
         );
       })().finally(() => {
         flushPromise = null;
+        if (flushAgain) {
+          flushAgain = false;
+          void this.flushOutbox();
+        }
       });
       return flushPromise;
     },
@@ -385,8 +420,23 @@ export const useMessagesStore = defineStore('messages', {
       this.persistConversation(conversationId);
     },
     setTyping(conversationId: string, userId: string, isTyping: boolean) {
+      const key = `${conversationId}:${userId}`;
+      const pending = typingTimers.get(key);
+      if (pending) {
+        clearTimeout(pending);
+        typingTimers.delete(key);
+      }
       this.typing[conversationId] ||= {};
       this.typing[conversationId][userId] = isTyping;
+      if (isTyping) {
+        typingTimers.set(
+          key,
+          setTimeout(() => {
+            typingTimers.delete(key);
+            if (this.typing[conversationId]) this.typing[conversationId][userId] = false;
+          }, TYPING_EXPIRY_MS)
+        );
+      }
     },
     sortMessages(messages: Message[]) {
       messages.sort((left, right) => {

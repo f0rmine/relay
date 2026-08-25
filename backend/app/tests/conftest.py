@@ -20,12 +20,15 @@ os.environ.setdefault(
 )
 
 from app import models  # noqa: E402,F401
+from app.api import deps as deps_module  # noqa: E402
 from app.api.routes import conversations as conversations_route  # noqa: E402
 from app.api.routes import messages as messages_route  # noqa: E402
 from app.api.routes import users as users_route  # noqa: E402
 from app.core.database import Base, get_db  # noqa: E402
 from app.core.rate_limit import auth_rate_limit, clear_auth_rate_limit  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services import attachments as attachments_module  # noqa: E402
+from app.services import auth as auth_service_module  # noqa: E402
 
 
 class FakeRedis:
@@ -44,6 +47,22 @@ class FakeRedis:
 
     async def exists(self, key: str) -> int:
         return int(key in self.values)
+
+    async def incr(self, key: str) -> int:
+        value = int(self.values.get(key, 0)) + 1
+        self.values[key] = str(value)
+        return value
+
+    async def incrby(self, key: str, amount: int) -> int:
+        value = int(self.values.get(key, 0)) + amount
+        self.values[key] = str(value)
+        return value
+
+    async def expire(self, key: str, seconds: int) -> int:
+        return int(key in self.values)
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
 
     async def mget(self, keys: list[str]) -> list[str | None]:
         return [self.values.get(key) for key in keys]
@@ -107,6 +126,9 @@ async def client(tmp_path: Path) -> AsyncGenerator[AsyncClient, None]:
     users_route.get_redis = fake_get_redis
     conversations_route.get_redis = fake_get_redis
     messages_route.get_redis = fake_get_redis
+    deps_module.get_redis = fake_get_redis
+    auth_service_module.get_redis = fake_get_redis
+    attachments_module.get_redis = fake_get_redis
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:

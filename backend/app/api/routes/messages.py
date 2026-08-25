@@ -5,6 +5,7 @@ from app.core.redis import get_redis
 from app.schemas.message import MessageCreate, MessageEdit, MessageOut
 from app.services.conversations import latest_message, require_participant
 from app.services.messages import create_message_idempotent, delete_message_for_everyone, edit_message
+from app.services.presence import is_online
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
 from app.websocket.manager import manager
@@ -46,8 +47,7 @@ async def send_message(
         participant_id
         for participant_id in participants
         if participant_id != current_user.id
-        and not manager.is_connected(participant_id)
-        and not manager.is_in_room(message.conversation_id, participant_id)
+        and not await is_online(redis, participant_id)
     ]
     schedule_message_push(push_recipient_ids, current_user.id, message.id)
     return message_payload

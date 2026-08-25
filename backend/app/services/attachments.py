@@ -1,4 +1,5 @@
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from app.core.encryption import (
     attachment_associated_data,
     get_encryption_keyring,
 )
+from app.core.redis import get_redis
 from app.models.attachment import Attachment
 from app.models.conversation import ConversationParticipant
 from app.models.message import Message
@@ -72,6 +74,18 @@ def normalized_filename(filename: str | None) -> str:
     return name
 
 
+async def _ensure_daily_upload_quota(user: User, size_bytes: int) -> None:
+    settings = get_settings()
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    key = f"quota:uploads:{user.id}:{day}"
+    redis = await get_redis()
+    used = int(await redis.incrby(key, size_bytes))
+    if used == size_bytes:
+        await redis.expire(key, 60 * 60 * 25)
+    if used > settings.upload_daily_size_limit_mb * 1024 * 1024:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Upload quota exceeded")
+
+
 async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachment:
     settings = get_settings()
     original_filename = normalized_filename(file.filename)
@@ -87,6 +101,7 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file upload")
     if is_image(content_type) and sniff_image_type(data) != content_type:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image content does not match file type")
+    await _ensure_daily_upload_quota(user, len(data))
 
     attachment_id = str(uuid4())
     encrypted_data = get_encryption_keyring().encrypt(

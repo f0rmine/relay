@@ -17,7 +17,6 @@ from app.core.database import AsyncSessionLocal
 from app.models.device import DeviceToken
 from app.models.message import Message
 from app.models.user import User
-from app.services.messages import plaintext_message_text
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +111,11 @@ def push_preview(message: Message, locale: str = "en") -> str:
     labels = PUSH_PREVIEW_LABELS.get(locale, PUSH_PREVIEW_LABELS["en"])
     if message.deleted_at:
         return labels["deleted"]
-    text = plaintext_message_text(message)
-    if text and text.strip():
-        return text.strip()
+    has_text = message.text_ciphertext is not None or message.text is not None
     attachment = message.attachments[0] if message.attachments else None
-    if attachment and attachment.mime_type.startswith("image/"):
-        return labels["image"]
-    if attachment:
+    if not has_text and attachment is not None:
+        if attachment.mime_type.startswith("image/"):
+            return labels["image"]
         return labels["attachment"]
     return labels["message"]
 
