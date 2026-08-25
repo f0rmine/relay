@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from functools import lru_cache
@@ -14,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
+from app.core.redis import get_redis
 from app.models.device import DeviceToken
 from app.models.message import Message
 from app.models.user import User
@@ -22,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 FCM_CONFIG_ERROR_COOLDOWN_SECONDS = 300
+PUSH_QUEUE_KEY = "push:queue"
+PUSH_JOB_MAX_ATTEMPTS = 3
 PUSH_PREVIEW_LABELS = {
     "en": {
         "deleted": "Message deleted",
@@ -74,9 +78,64 @@ async def _send_message_push_by_id(
 def schedule_message_push(recipient_ids: list[str], sender_id: str, message_id: str) -> None:
     if not recipient_ids:
         return
-    task = asyncio.create_task(_send_message_push_by_id(recipient_ids, sender_id, message_id))
+    job = json.dumps(
+        {"recipient_ids": recipient_ids, "sender_id": sender_id, "message_id": message_id}
+    )
+    task = asyncio.create_task(_enqueue_push_job(job))
     _push_tasks.add(task)
     task.add_done_callback(_push_task_finished)
+
+
+async def _enqueue_push_job(job: str) -> None:
+    try:
+        redis = await get_redis()
+        await redis.rpush(PUSH_QUEUE_KEY, job)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Failed to enqueue push notification")
+
+
+async def push_queue_worker() -> None:
+    while True:
+        try:
+            redis = await get_redis()
+            item = await redis.blpop(PUSH_QUEUE_KEY, timeout=5)
+            if item is None:
+                continue
+            raw = item[1] if isinstance(item, tuple) else item
+            try:
+                job = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Discarding malformed push queue entry")
+                continue
+            await _run_push_job(job)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Push queue worker cycle failed")
+            await asyncio.sleep(2)
+
+
+async def _run_push_job(job: dict) -> None:
+    recipient_ids = job.get("recipient_ids") or []
+    sender_id = job.get("sender_id")
+    message_id = job.get("message_id")
+    if not recipient_ids or not sender_id or not message_id:
+        return
+    for attempt in range(1, PUSH_JOB_MAX_ATTEMPTS + 1):
+        try:
+            await _send_message_push_by_id(recipient_ids, sender_id, message_id)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Push delivery attempt %s/%s failed", attempt, PUSH_JOB_MAX_ATTEMPTS
+            )
+            if attempt < PUSH_JOB_MAX_ATTEMPTS:
+                await asyncio.sleep(2 * attempt)
+    logger.error("Push job dropped after %s attempts", PUSH_JOB_MAX_ATTEMPTS)
 
 
 async def drain_push_tasks() -> None:

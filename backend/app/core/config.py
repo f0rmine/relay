@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("./uploads")
     max_upload_size_mb: int = Field(default=10, ge=1, le=100)
     upload_daily_size_limit_mb: int = Field(default=1024, ge=1, le=1_000_000)
+    orphan_attachment_ttl_hours: int = Field(default=24, ge=1, le=720)
+    message_rate_limit_per_minute: int = Field(default=30, ge=20, le=40)
     encryption_active_key_id: str = ""
     encryption_keys: dict[str, str] = Field(default_factory=dict)
     firebase_project_id: str | None = None

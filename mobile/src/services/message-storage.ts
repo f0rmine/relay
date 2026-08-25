@@ -61,8 +61,14 @@ function openDatabase(): Promise<IDBDatabase> | null {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error('Local message database upgrade is blocked'));
+    request.onerror = () => {
+      databasePromise = null;
+      reject(request.error);
+    };
+    request.onblocked = () => {
+      databasePromise = null;
+      reject(new Error('Local message database upgrade is blocked'));
+    };
   });
   return databasePromise;
 }

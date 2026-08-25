@@ -7,11 +7,11 @@ from app.core import rate_limit
 
 class FakeRedis:
     def __init__(self) -> None:
-        self.values: dict[str, int] = {}
+        self.windows: dict[str, int] = {}
 
-    async def eval(self, script: str, key_count: int, key: str, ttl: int) -> int:
-        self.values[key] = self.values.get(key, 0) + 1
-        return self.values[key]
+    async def eval(self, script: str, key_count: int, key: str, *args) -> int:
+        self.windows[key] = self.windows.get(key, 0) + 1
+        return self.windows[key]
 
 
 def request() -> Request:
@@ -43,4 +43,4 @@ async def test_auth_rate_limit_is_shared_through_redis(monkeypatch) -> None:
         await rate_limit.auth_rate_limit(request())
 
     assert raised.value.status_code == 429
-    assert len(redis.values) == 1
+    assert len(redis.windows) == 1

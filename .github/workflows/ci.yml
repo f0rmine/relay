@@ -15,7 +15,23 @@ jobs:
   backend:
     name: Backend tests and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://relay:ci-only-postgres-password@localhost:5432/relay
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: relay
+          POSTGRES_USER: relay
+          POSTGRES_PASSWORD: ci-only-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,6 +41,17 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend dependencies
         run: python -m pip install -e "backend[dev]"
+      - name: Run migrations against Postgres
+        working-directory: backend
+        env:
+          ENCRYPTION_ACTIVE_KEY_ID: ci
+          ENCRYPTION_KEYS: '{"ci":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}'
+          JWT_SECRET: ci-only-access-secret-at-least-32-bytes-long
+          JWT_REFRESH_SECRET: ci-only-refresh-secret-at-least-32-bytes-long
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
       - name: Run backend tests
         working-directory: backend
         run: pytest

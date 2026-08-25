@@ -27,6 +27,7 @@ class MessageOut(OrmModel):
     sender_id: str
     client_message_id: str | None = None
     text: str | None
+    undecryptable: bool = False
     created_at: datetime
     updated_at: datetime
     edited_at: datetime | None

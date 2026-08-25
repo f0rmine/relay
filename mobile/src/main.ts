@@ -72,5 +72,9 @@ CapacitorApp.addListener('backButton', async ({ canGoBack }) => {
     await toast.present();
     return;
   }
-  if (canGoBack) router.back();
+  if (canGoBack) {
+    router.back();
+    return;
+  }
+  void router.push('/conversations');
 });

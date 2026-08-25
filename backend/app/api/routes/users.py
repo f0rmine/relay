@@ -1,11 +1,16 @@
+import mimetypes
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
+from app.core.config import get_settings
 from app.core.redis import get_redis
+from app.core.security import verify_avatar_url
 from app.models.user import User
 from app.schemas.user import ProfileUpdate, UserPublic, UserSearchResult
 from app.services.presence import online_map
@@ -70,3 +75,17 @@ async def upload_avatar(
 ) -> UserPublic:
     user = await save_avatar(db, current_user, file)
     return UserPublic.model_validate(user)
+
+
+@router.get("/avatar/{filename}")
+async def get_avatar(filename: str, exp: int, sig: str) -> FileResponse:
+    if Path(filename).name != filename or "/" in filename or ".." in filename:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
+    url = f"/uploads/avatars/{filename}"
+    if not verify_avatar_url(url, exp, sig):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid avatar link")
+    path = get_settings().upload_dir / "avatars" / filename
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
+    media_type, _ = mimetypes.guess_type(filename)
+    return FileResponse(path, media_type=media_type or "application/octet-stream")

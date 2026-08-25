@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime
+from time import time
 from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -12,7 +14,9 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_ws_user_from_token
 from app.core.database import AsyncSessionLocal
+from app.core.rate_limit import consume_message_allowance, consume_ws_auth_allowance
 from app.core.redis import get_redis
+from app.core.security import decode_jwt_token
 from app.models.conversation import Conversation, ConversationParticipant
 from app.models.user import User
 from app.schemas.ws import (
@@ -62,13 +66,20 @@ async def send_error(websocket: WebSocket, message: str, request_id: str | None 
     await websocket.send_json({"type": "error", "payload": payload})
 
 
-async def authenticate_websocket(db: AsyncSession, websocket: WebSocket) -> User:
+async def authenticate_websocket(db: AsyncSession, websocket: WebSocket) -> tuple[User, float | None]:
     raw = await asyncio.wait_for(websocket.receive_json(), timeout=10)
     envelope = WebSocketEnvelope.model_validate(raw)
     if envelope.type != "auth":
         raise ValueError("First WebSocket event must be auth")
     payload = AuthPayload.model_validate(envelope.payload)
-    return await get_ws_user_from_token(db, payload.token)
+    user = await get_ws_user_from_token(db, payload.token)
+    claims = decode_jwt_token(payload.token, "access")
+    return user, float(claims["exp"])
+
+
+async def _close_expired_socket(websocket: WebSocket) -> None:
+    with suppress(Exception):
+        await websocket.close(code=1008)
 
 
 async def refresh_presence(redis, user_id: str, instance_id: str) -> None:
@@ -86,9 +97,14 @@ async def refresh_presence(redis, user_id: str, instance_id: str) -> None:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     redis = await get_redis()
+    client_ip = websocket.client.host if getattr(websocket, "client", None) else "unknown"
+    if not await consume_ws_auth_allowance(client_ip):
+        await send_error(websocket, "Too many connection attempts")
+        await websocket.close(code=1008)
+        return
     async with AsyncSessionLocal() as db:
         try:
-            user = await authenticate_websocket(db, websocket)
+            user, token_exp = await authenticate_websocket(db, websocket)
         except (TimeoutError, ValueError, ValidationError):
             await send_error(websocket, "Authentication required")
             await websocket.close(code=1008)
@@ -99,8 +115,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             return
 
         presence_task: asyncio.Task | None = None
+        expiry_handle: asyncio.TimerHandle | None = None
         registered = False
         try:
+            if token_exp is not None:
+                delay = max(0.0, token_exp - time() + 30.0)
+                loop = asyncio.get_running_loop()
+                expiry_handle = loop.call_later(
+                    delay, lambda: asyncio.create_task(_close_expired_socket(websocket))
+                )
             await manager.register(user.id, websocket)
             registered = True
             await websocket.send_json({"type": "auth:ok", "payload": {"user_id": user.id}})
@@ -126,6 +149,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     envelope = WebSocketEnvelope.model_validate(raw)
                     request_id = envelope.request_id
                     await handle_event(db, redis, websocket, user, envelope)
+                    await db.rollback()
                 except ValidationError:
                     await db.rollback()
                     await send_error(websocket, "Invalid event payload", request_id)
@@ -135,6 +159,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         except WebSocketDisconnect:
             pass
         finally:
+            if expiry_handle is not None:
+                expiry_handle.cancel()
             if presence_task is not None:
                 presence_task.cancel()
                 try:
@@ -167,13 +193,13 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
     if envelope.type == "conversation:join":
         payload = ConversationIdPayload.model_validate(envelope.payload)
         await require_participant(db, payload.conversation_id, user.id)
-        await manager.join_room(payload.conversation_id, user.id)
+        await manager.join_room(payload.conversation_id, user.id, websocket)
         await websocket.send_json({"type": "conversation:joined", "payload": payload.model_dump()})
         return
 
     if envelope.type == "conversation:leave":
         payload = ConversationIdPayload.model_validate(envelope.payload)
-        await manager.leave_room(payload.conversation_id, user.id)
+        await manager.leave_room(payload.conversation_id, user.id, websocket)
         await websocket.send_json({"type": "conversation:left", "payload": payload.model_dump()})
         return
 
@@ -202,6 +228,9 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         return
 
     if envelope.type == "message:send":
+        if not await consume_message_allowance(user.id):
+            await send_error(websocket, "Too many messages", envelope.request_id)
+            return
         payload = MessageSendPayload.model_validate(envelope.payload)
         client_message_id = payload.client_message_id or envelope.request_id or str(uuid4())
         message, created = await create_message_idempotent(

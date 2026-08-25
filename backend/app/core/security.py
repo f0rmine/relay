@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+import secrets
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
@@ -34,6 +38,30 @@ def hash_token(token: str) -> str:
 
 def verify_token_hash(token: str, token_hash: str) -> bool:
     return verify_password(token, token_hash)
+
+
+AVATAR_LINK_TTL_SECONDS = 7 * 24 * 3600
+AVATAR_URL_PREFIX = "/uploads/avatars/"
+
+
+def _avatar_signature(path: str, exp: int) -> str:
+    return hmac.new(
+        settings.jwt_secret.encode(), f"{path}:{exp}".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def sign_avatar_url(url: str | None) -> str | None:
+    if not url or not url.startswith(AVATAR_URL_PREFIX) or "sig=" in url:
+        return url
+    exp = int(time.time()) + AVATAR_LINK_TTL_SECONDS
+    sig = _avatar_signature(url.split("?")[0], exp)
+    return f"{url}?exp={exp}&sig={sig}"
+
+
+def verify_avatar_url(url: str, exp: int, sig: str) -> bool:
+    if not url.startswith(AVATAR_URL_PREFIX) or exp < time.time():
+        return False
+    return secrets.compare_digest(_avatar_signature(url, exp), sig)
 
 
 def _secret_for(token_type: TokenType) -> str:

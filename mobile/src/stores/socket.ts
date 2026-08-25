@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { webSocketUrl } from '@/config/env';
+import { refreshTokens } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
@@ -33,6 +34,17 @@ function stringField(payload: Record<string, unknown>, key: string): string | nu
 function stringArrayField(payload: Record<string, unknown>, key: string): string[] {
   const value = payload[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function tokenExpiresSoon(token: string): boolean {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return false;
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now() + 30_000;
+  } catch {
+    return false;
+  }
 }
 
 export const useSocketStore = defineStore('socket', {
@@ -75,6 +87,21 @@ export const useSocketStore = defineStore('socket', {
       this.authRequested = true;
       socket.send(JSON.stringify({ type: 'auth', payload: { token } }));
     },
+    async ensureFreshAccessToken(): Promise<string | null> {
+      const auth = useAuthStore();
+      try {
+        await auth.syncFromStorage();
+      } catch {
+        return null;
+      }
+      let token = auth.accessToken;
+      if (!token) return null;
+      if (tokenExpiresSoon(token)) {
+        const refreshed = await refreshTokens().catch(() => null);
+        token = refreshed?.access_token || null;
+      }
+      return token;
+    },
     async connect() {
       this.manualDisconnect = false;
       this.clearReconnectTimer();
@@ -85,18 +112,13 @@ export const useSocketStore = defineStore('socket', {
       }
       if (this.connecting || existingSocket?.readyState === WebSocket.CONNECTING) return;
       this.connecting = true;
-      try {
-        await auth.syncFromStorage();
-      } catch {
-        this.connecting = false;
-        return;
-      }
-      const accessToken = auth.accessToken;
+      const accessToken = await this.ensureFreshAccessToken();
       if (!accessToken) {
         this.connecting = false;
         return;
       }
       if (existingSocket?.readyState === WebSocket.OPEN) {
+        this.connecting = false;
         this.sendAuth(existingSocket, accessToken);
         return;
       }

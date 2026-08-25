@@ -1,5 +1,5 @@
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
 from app.core.encryption import (
     ENCRYPTION_VERSION,
     DecryptionError,
@@ -189,3 +190,23 @@ async def require_attachment_access(
     if participant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
     return attachment
+
+
+async def cleanup_orphan_attachments() -> int:
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(hours=settings.orphan_attachment_ttl_hours)
+    async with AsyncSessionLocal() as db:
+        orphans = (
+            await db.scalars(
+                select(Attachment).where(
+                    Attachment.message_id.is_(None),
+                    Attachment.created_at < cutoff,
+                )
+            )
+        ).all()
+        for attachment in orphans:
+            with suppress(OSError):
+                Path(attachment.encrypted_path or attachment.storage_path).unlink(missing_ok=True)
+            await db.delete(attachment)
+        await db.commit()
+        return len(orphans)

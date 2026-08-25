@@ -275,7 +275,7 @@ async def test_replacing_avatar_removes_previous_local_file(
         headers=auth_headers(alice["access_token"]),
         files={"file": ("first.png", image, "image/png")},
     )
-    first_path = tmp_path / "avatars" / first.json()["avatar_url"].rsplit("/", 1)[-1]
+    first_path = tmp_path / "avatars" / first.json()["avatar_url"].rsplit("/", 1)[-1].split("?")[0]
     assert first_path.exists()
 
     second = await client.post(
@@ -283,7 +283,7 @@ async def test_replacing_avatar_removes_previous_local_file(
         headers=auth_headers(alice["access_token"]),
         files={"file": ("second.png", image, "image/png")},
     )
-    second_path = tmp_path / "avatars" / second.json()["avatar_url"].rsplit("/", 1)[-1]
+    second_path = tmp_path / "avatars" / second.json()["avatar_url"].rsplit("/", 1)[-1].split("?")[0]
 
     assert second.status_code == 200
     assert second_path.exists()
@@ -1109,9 +1109,10 @@ async def test_websocket_auth_uses_first_frame_token() -> None:
         async def receive_json(self) -> dict:
             return {"type": "auth", "payload": {"token": token}}
 
-    authenticated = await authenticate_websocket(FakeDb(), FakeWebSocket())
+    authenticated, token_exp = await authenticate_websocket(FakeDb(), FakeWebSocket())
 
     assert authenticated is user
+    assert token_exp is not None and token_exp > 0
 
 
 async def test_websocket_connect_sends_auth_ok_before_events(client: AsyncClient, monkeypatch) -> None:
@@ -1304,12 +1305,41 @@ async def test_scheduled_push_runs_outside_message_handler_and_drains(monkeypatc
 
     monkeypatch.setattr(push, "_send_message_push_by_id", delayed_push)
 
-    push.schedule_message_push(["recipient"], "sender", "message")
-    await started.wait()
-    assert calls == [(["recipient"], "sender", "message")]
+    class QueueFakeRedis:
+        def __init__(self) -> None:
+            self.lists: dict[str, list[str]] = {}
 
-    release.set()
-    await push.drain_push_tasks()
+        async def rpush(self, key: str, value: str) -> int:
+            self.lists.setdefault(key, []).append(value)
+            return len(self.lists[key])
+
+        async def blpop(self, key: str, timeout: int = 0) -> tuple[str, str] | None:
+            queue = self.lists.get(key)
+            if not queue:
+                await asyncio.sleep(0.01)
+                return None
+            return key, queue.pop(0)
+
+    fake_redis = QueueFakeRedis()
+
+    async def fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(push, "get_redis", fake_get_redis)
+
+    push.schedule_message_push(["recipient"], "sender", "message")
+    worker = asyncio.create_task(push.push_queue_worker())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+    finally:
+        release.set()
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+
+    assert calls == [(["recipient"], "sender", "message")]
 
 
 async def test_websocket_delete_updates_conversation_preview(client: AsyncClient, monkeypatch) -> None:

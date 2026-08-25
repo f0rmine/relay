@@ -23,15 +23,15 @@ ALLOWED_AVATAR_EXTENSIONS = {
 
 
 async def search_users(db: AsyncSession, q: str, current_user_id: str, limit: int = 20) -> list[User]:
-    term = f"%{q.lower()}%"
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    term = f"%{escaped.lower()}%"
     stmt = (
         select(User)
         .where(User.id != current_user_id)
         .where(
             or_(
-                User.username.ilike(term),
-                User.display_name.ilike(term),
-                User.email.ilike(term),
+                User.username.ilike(term, escape="\\"),
+                User.display_name.ilike(term, escape="\\"),
             )
         )
         .order_by(User.username.asc())

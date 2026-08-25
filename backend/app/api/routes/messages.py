@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.deps import CurrentUser, DbSession
+from app.core.rate_limit import consume_message_allowance
 from app.core.redis import get_redis
 from app.schemas.message import MessageCreate, MessageEdit, MessageOut
 from app.services.conversations import latest_message, require_participant
@@ -24,6 +25,8 @@ async def send_message(
     current_user: CurrentUser,
     db: DbSession,
 ) -> dict:
+    if not await consume_message_allowance(current_user.id):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many messages")
     message, created = await create_message_idempotent(
         db,
         current_user,

@@ -42,6 +42,12 @@ export const useConversationsStore = defineStore('conversations', {
     applyLatest(conversationId: string, latestMessage: Message) {
       const item = this.items.find((conversation) => conversation.id === conversationId);
       if (!item) return;
+      if (
+        item.latest_message &&
+        new Date(item.latest_message.created_at) > new Date(latestMessage.created_at)
+      ) {
+        return;
+      }
       item.latest_message = latestMessage;
       item.updated_at = latestMessage.created_at;
       this.sort();

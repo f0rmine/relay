@@ -13,6 +13,7 @@ const props = defineProps<{ attachment: Attachment }>();
 const emit = defineEmits<{ click: [url: string] }>();
 const imageUrl = ref('');
 let objectUrl = '';
+let loadSequence = 0;
 const { t } = useI18n();
 
 function clearObjectUrl() {
@@ -24,6 +25,7 @@ function clearObjectUrl() {
 watch(
   () => props.attachment.id,
   async (attachmentId) => {
+    const sequence = ++loadSequence;
     clearObjectUrl();
     if (attachmentId.startsWith('local-attachment-')) {
       imageUrl.value = props.attachment.public_url;
@@ -31,16 +33,20 @@ watch(
     }
     try {
       const blob = await apiBlob(`/attachments/${attachmentId}/download`);
+      if (sequence !== loadSequence) return;
       objectUrl = URL.createObjectURL(blob);
       imageUrl.value = objectUrl;
     } catch {
-      clearObjectUrl();
+      if (sequence === loadSequence) clearObjectUrl();
     }
   },
   { immediate: true }
 );
 
-onUnmounted(clearObjectUrl);
+onUnmounted(() => {
+  loadSequence += 1;
+  clearObjectUrl();
+});
 </script>
 
 <style scoped>
