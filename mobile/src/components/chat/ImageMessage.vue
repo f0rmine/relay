@@ -1,5 +1,5 @@
 <template>
-  <img v-if="imageUrl" class="image" :src="imageUrl" :alt="attachment.original_filename" />
+  <img v-if="imageUrl" class="image" :src="imageUrl" :alt="attachment.original_filename" @click="emit('click', imageUrl)" />
   <div v-else class="image placeholder">{{ t('chat.imageUnavailable') }}</div>
 </template>
 
@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n';
 import type { Attachment } from '@/api/types';
 
 const props = defineProps<{ attachment: Attachment }>();
+const emit = defineEmits<{ click: [url: string] }>();
 const imageUrl = ref('');
 let objectUrl = '';
 const { t } = useI18n();

@@ -1,8 +1,15 @@
 <template>
   <div class="composer">
-    <AttachmentPreview :file="file" @clear="file = null" />
+    <div v-if="editingMessage" class="edit-bar">
+      <ion-icon :icon="createOutline" class="edit-icon" />
+      <span class="edit-label">{{ t('chat.editMessage') }}</span>
+      <ion-button fill="clear" class="cancel-edit" @click="cancelEdit" :aria-label="t('chat.cancelEdit')">
+        <ion-icon :icon="closeOutline" />
+      </ion-button>
+    </div>
+    <AttachmentPreview v-if="!editingMessage" :file="file" @clear="file = null" />
     <div class="bar">
-      <ion-button fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
+      <ion-button v-if="!editingMessage" fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
         <ion-icon :icon="attachOutline" />
       </ion-button>
       <input ref="fileInput" class="hidden" type="file" @change="onFile" />
@@ -17,35 +24,54 @@
           spellcheck="false"
           enterkeyhint="send"
           @input="resizeInput"
-          @focus="$emit('typing', true)"
-          @blur="$emit('typing', false)"
+          @focus="onFocus"
+          @blur="onBlur"
         ></textarea>
       </div>
-      <ion-button class="send-button" shape="round" :disabled="!canSend || sending" @click="submit" :aria-label="t('chat.sendMessage')">
-        <ion-icon :icon="paperPlaneOutline" />
+      <ion-button class="send-button" shape="round" :disabled="!canSend || sending" @click="submit" :aria-label="editingMessage ? t('chat.editMessage') : t('chat.sendMessage')">
+        <ion-icon :icon="editingMessage ? checkmarkOutline : paperPlaneOutline" />
       </ion-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { IonButton, IonIcon } from '@ionic/vue';
-import { attachOutline, paperPlaneOutline } from 'ionicons/icons';
+import { attachOutline, paperPlaneOutline, closeOutline, createOutline, checkmarkOutline } from 'ionicons/icons';
 import { useI18n } from 'vue-i18n';
 import AttachmentPreview from './AttachmentPreview.vue';
 
+export interface EditingMessage {
+  id: string;
+  text: string;
+}
+
+const props = defineProps<{ sending?: boolean; editingMessage?: EditingMessage | null }>();
 const emit = defineEmits<{
   send: [text: string, file: File | null, complete: (accepted: boolean) => void];
   typing: [active: boolean];
+  edit: [text: string, complete: (accepted: boolean) => void];
+  'cancel-edit': [];
 }>();
-defineProps<{ sending?: boolean }>();
 const text = ref('');
 const file = ref<File | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const textInput = ref<HTMLTextAreaElement | null>(null);
 const canSend = computed(() => text.value.trim().length > 0 || file.value);
 const { t } = useI18n();
+
+let typingStopTimer: ReturnType<typeof setTimeout> | null = null;
+const typingActive = ref(false);
+
+watch(() => props.editingMessage, (msg) => {
+  if (msg) {
+    text.value = msg.text;
+    file.value = null;
+    if (fileInput.value) fileInput.value.value = '';
+    requestAnimationFrame(resizeInput);
+  }
+}, { immediate: true });
 
 function pick() {
   fileInput.value?.click();
@@ -62,15 +88,62 @@ function resizeInput() {
   input.style.height = `${Math.min(input.scrollHeight, 110)}px`;
 }
 
+function stopTyping() {
+  if (typingStopTimer) {
+    clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+  }
+  if (typingActive.value) {
+    typingActive.value = false;
+    emit('typing', false);
+  }
+}
+
+onBeforeUnmount(stopTyping);
+
+function onFocus() {
+  if (typingStopTimer) {
+    clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+  }
+  if (!typingActive.value) {
+    typingActive.value = true;
+    emit('typing', true);
+  }
+}
+
+function onBlur() {
+  typingStopTimer = setTimeout(() => {
+    typingStopTimer = null;
+    typingActive.value = false;
+    emit('typing', false);
+  }, 500);
+}
+
+function cancelEdit() {
+  text.value = '';
+  requestAnimationFrame(resizeInput);
+  emit('cancel-edit');
+}
+
 function submit() {
   if (!canSend.value) return;
-  emit('send', text.value, file.value, (accepted) => {
-    if (!accepted) return;
-    text.value = '';
-    file.value = null;
-    if (fileInput.value) fileInput.value.value = '';
-    requestAnimationFrame(resizeInput);
-  });
+  stopTyping();
+  if (props.editingMessage) {
+    emit('edit', text.value.trim(), (accepted) => {
+      if (!accepted) return;
+      text.value = '';
+      requestAnimationFrame(resizeInput);
+    });
+  } else {
+    emit('send', text.value, file.value, (accepted) => {
+      if (!accepted) return;
+      text.value = '';
+      file.value = null;
+      if (fileInput.value) fileInput.value.value = '';
+      requestAnimationFrame(resizeInput);
+    });
+  }
 }
 </script>
 
@@ -79,6 +152,32 @@ function submit() {
   background: var(--ion-toolbar-background);
   border-top: 1px solid var(--relay-border);
   padding-bottom: env(safe-area-inset-bottom);
+}
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 0;
+  font-size: 13px;
+  color: var(--relay-muted);
+}
+.edit-icon {
+  font-size: 14px;
+  color: var(--ion-color-primary);
+}
+.edit-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ion-color-primary);
+  font-weight: 500;
+}
+.cancel-edit {
+  --padding-start: 0;
+  --padding-end: 0;
+  --color: var(--relay-muted);
+  margin: 0;
 }
 .bar {
   display: grid;

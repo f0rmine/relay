@@ -10,14 +10,23 @@
         :current-user-id="auth.user?.id"
         :participants="conversation?.participants || []"
         :typing="isPeerTyping"
+        :peer-name="peerName"
         :has-more="messages.hasMore[conversationId]"
         @older="messages.fetch(conversationId, true)"
         @delete-message="deleteMessage"
         @retry-message="messages.retry"
         @remove-pending="messages.removePending"
+        @edit-message="startEdit"
       />
     </ion-content>
-    <MessageInput :sending="sending" @send="send" @typing="typing" />
+    <MessageInput
+      :sending="sending"
+      :editing-message="editingMessage"
+      @send="send"
+      @typing="typing"
+      @edit="submitEdit"
+      @cancel-edit="cancelEdit"
+    />
   </ion-page>
 </template>
 
@@ -30,7 +39,9 @@ import { displayError } from '@/api/client';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 import ChatWindow from '@/components/chat/ChatWindow.vue';
 import MessageInput from '@/components/chat/MessageInput.vue';
+import type { EditingMessage } from '@/components/chat/MessageInput.vue';
 import ErrorState from '@/components/ErrorState.vue';
+import type { Message } from '@/api/types';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
@@ -46,10 +57,12 @@ const messages = useMessagesStore();
 const socket = useSocketStore();
 const sending = ref(false);
 const error = ref('');
+const editingMessage = ref<EditingMessage | null>(null);
 const { t } = useI18n();
 
 const conversation = computed(() => conversations.items.find((item) => item.id === conversationId.value));
 const peer = computed(() => conversation.value?.participants.find((user) => user.id !== auth.user?.id));
+const peerName = computed(() => peer.value?.display_name || '');
 const isPeerTyping = computed(() => Boolean(
   peer.value && messages.typing[conversationId.value]?.[peer.value.id]
 ));
@@ -59,6 +72,7 @@ async function loadConversation(id: string, previousId?: string) {
   const sequence = ++loadSequence;
   if (previousId) socket.leave(previousId);
   error.value = '';
+  editingMessage.value = null;
   try {
     if (!conversations.items.some((item) => item.id === id)) await conversations.fetchAll();
     if (sequence !== loadSequence) return;
@@ -124,6 +138,29 @@ async function deleteMessage(messageId: string) {
     await messages.delete(messageId);
   } catch (err: unknown) {
     error.value = displayError(err, t('chat.deleteFailed'));
+  }
+}
+
+function startEdit(message: Message) {
+  editingMessage.value = { id: message.id, text: message.text || '' };
+}
+
+function cancelEdit() {
+  editingMessage.value = null;
+}
+
+async function submitEdit(text: string, complete: (accepted: boolean) => void) {
+  if (!editingMessage.value) return;
+  error.value = '';
+  let accepted = false;
+  try {
+    await messages.edit(editingMessage.value.id, text);
+    accepted = true;
+    editingMessage.value = null;
+  } catch (err: unknown) {
+    error.value = displayError(err, t('chat.editFailed'));
+  } finally {
+    complete(accepted);
   }
 }
 </script>

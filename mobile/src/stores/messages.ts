@@ -336,6 +336,13 @@ export const useMessagesStore = defineStore('messages', {
       const message = await apiFetch<Message>(`/messages/${messageId}`, { method: 'DELETE' });
       this.markDeleted(message);
     },
+    async edit(messageId: string, text: string) {
+      const message = await apiFetch<Message>(`/messages/${messageId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ text })
+      });
+      this.upsert(message);
+    },
     upsert(message: Message) {
       const clientMessageId = message.client_message_id || message.request_id;
       if (clientMessageId && this.outbox[clientMessageId]) {

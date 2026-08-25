@@ -224,3 +224,37 @@ async def delete_message_for_everyone(db: AsyncSession, message_id: str, user: U
     await db.commit()
     await db.refresh(message, attribute_names=["attachments", "reads"])
     return message
+
+
+async def edit_message(db: AsyncSession, message_id: str, user: User, new_text: str) -> Message:
+    message = (
+        await db.scalars(
+            select(Message)
+            .options(selectinload(Message.attachments), selectinload(Message.reads))
+            .where(Message.id == message_id)
+        )
+    ).first()
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    await require_participant(db, message.conversation_id, user.id)
+    if message.sender_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sender can edit this message")
+    if message.deleted_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot edit a deleted message")
+    if message.text_ciphertext is None and message.text is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot edit an attachment-only message")
+    now = datetime.now(UTC)
+    encrypted_text = get_encryption_keyring().encrypt(
+        new_text.encode("utf-8"),
+        associated_data=message_text_associated_data(message.id),
+    )
+    message.text = None
+    message.text_ciphertext = encrypted_text.ciphertext
+    message.text_nonce = encrypted_text.nonce
+    message.text_key_id = encrypted_text.key_id
+    message.encryption_version = encrypted_text.version
+    message.edited_at = now
+    message.updated_at = now
+    await db.commit()
+    await db.refresh(message, attribute_names=["attachments", "reads"])
+    return message

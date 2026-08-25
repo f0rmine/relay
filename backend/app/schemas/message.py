@@ -36,6 +36,18 @@ class MessageOut(OrmModel):
     read_by: list[str] = Field(default_factory=list)
 
 
+class MessageEdit(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "MessageEdit":
+        stripped = self.text.strip()
+        if not stripped:
+            raise ValueError("Message text cannot be empty")
+        self.text = stripped
+        return self
+
+
 class MessageHistory(BaseModel):
     items: list[MessageOut]
     next_cursor: str | None = None

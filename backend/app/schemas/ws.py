@@ -32,6 +32,11 @@ class MessageDeletePayload(BaseModel):
     message_id: str
 
 
+class MessageEditPayload(BaseModel):
+    message_id: str
+    text: str = Field(min_length=1, max_length=4000)
+
+
 class ServerEvent(BaseModel):
     type: str
     payload: dict[str, Any]

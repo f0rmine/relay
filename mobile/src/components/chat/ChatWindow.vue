@@ -10,8 +10,9 @@
       @delete="$emit('delete-message', message.id)"
       @retry="$emit('retry-message', message.client_message_id || '')"
       @remove="$emit('remove-pending', message.client_message_id || '')"
+      @edit="$emit('edit-message', $event)"
     />
-    <TypingIndicator :visible="typing" />
+    <TypingIndicator :visible="typing" :peer-name="peerName" />
   </div>
 </template>
 
@@ -28,6 +29,7 @@ const props = defineProps<{
   currentUserId?: string;
   participants?: User[];
   typing: boolean;
+  peerName?: string;
   hasMore?: boolean;
 }>();
 const emit = defineEmits<{
@@ -35,6 +37,7 @@ const emit = defineEmits<{
   'delete-message': [messageId: string];
   'retry-message': [clientMessageId: string];
   'remove-pending': [clientMessageId: string];
+  'edit-message': [message: Message];
 }>();
 const scroller = ref<HTMLElement | null>(null);
 const preservingOlderScroll = ref(false);

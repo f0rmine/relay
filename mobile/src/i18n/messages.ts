@@ -105,9 +105,14 @@ export const messages = {
       sendMessage: 'Send message',
       removeAttachment: 'Remove',
       typing: 'typing...',
+      typingUser: '{name} is typing',
       loadFailed: 'Chat loading failed',
       sendFailed: 'Message send failed',
       deleteFailed: 'Message delete failed',
+      editFailed: 'Message edit failed',
+      edited: 'edited',
+      editMessage: 'Edit message',
+      cancelEdit: 'Cancel',
       realtimeUnavailable: 'Realtime connection is not ready. Wait a moment and try again.'
     },
     message: {
@@ -146,6 +151,7 @@ export const messages = {
         invalidAttachment: 'The selected attachment is invalid',
         messageNotFound: 'Message not found',
         deleteForbidden: 'Only the sender can delete this message',
+        editForbidden: 'Only the sender can edit this message',
         unsupportedFileType: 'This file type is not supported',
         fileTypeMismatch: 'The file extension does not match its type',
         emptyFile: 'The selected file is empty',
@@ -272,10 +278,15 @@ export const messages = {
       sendMessage: 'Надіслати повідомлення',
       removeAttachment: 'Видалити',
       typing: 'друкує...',
+      typingUser: '{name} друкує',
       loadFailed: 'Не вдалося завантажити чат',
       sendFailed: 'Не вдалося надіслати повідомлення',
       deleteFailed: 'Не вдалося видалити повідомлення',
-      realtimeUnavailable: 'З’єднання в реальному часі ще не готове. Зачекайте трохи та спробуйте ще раз.'
+      editFailed: 'Не вдалося редагувати повідомлення',
+      edited: 'редаговано',
+      editMessage: 'Редагувати повідомлення',
+      cancelEdit: 'Скасувати',
+      realtimeUnavailable: 'З\u2019єднання в реальному часі ще не готове. Зачекайте трохи та спробуйте ще раз.'
     },
     message: {
       deleted: 'Повідомлення видалено',
@@ -313,6 +324,7 @@ export const messages = {
         invalidAttachment: 'Вибране вкладення недійсне',
         messageNotFound: 'Повідомлення не знайдено',
         deleteForbidden: 'Лише відправник може видалити це повідомлення',
+        editForbidden: 'Лише відправник може редагувати це повідомлення',
         unsupportedFileType: 'Цей тип файлу не підтримується',
         fileTypeMismatch: 'Розширення файлу не відповідає його типу',
         emptyFile: 'Вибраний файл порожній',
