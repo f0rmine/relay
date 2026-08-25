@@ -4,7 +4,7 @@ import { refreshTokens } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
-import type { Message } from '@/api/types';
+import type { Conversation, Message } from '@/api/types';
 import { initNotifications, notifyNewMessage } from '@/services/notifications';
 import { activeConversationId } from '@/services/navigation';
 import { translate } from '@/i18n';
@@ -267,6 +267,10 @@ export const useSocketStore = defineStore('socket', {
       }
       if (type === 'message:deleted') messages.markDeleted(payload as unknown as Message);
       if (type === 'message:edited') messages.upsert(payload as unknown as Message);
+      if (type === 'message:updated') messages.upsert(payload as unknown as Message);
+      if (type === 'conversation:updated-info') {
+        conversations.applyConversationInfo(payload as unknown as Conversation);
+      }
       if (type === 'message:read') {
         const conversationId = stringField(payload, 'conversation_id');
         const userId = stringField(payload, 'user_id');

@@ -7,7 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.routes import attachments, auth, conversations, devices, messages, users
+from app.api.routes import (
+    attachments,
+    auth,
+    conversations,
+    devices,
+    messages,
+    search,
+    users,
+)
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.encryption import get_encryption_keyring
@@ -138,6 +146,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(conversations.router)
 app.include_router(messages.router)
+app.include_router(search.router)
 app.include_router(attachments.router)
 app.include_router(devices.router)
 app.include_router(websocket_router)

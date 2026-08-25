@@ -47,11 +47,39 @@ class Message(Base):
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reply_to_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
 
-    conversation = relationship("Conversation", back_populates="messages")
+    conversation = relationship(
+        "Conversation", back_populates="messages", foreign_keys=[conversation_id]
+    )
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
     attachments = relationship("Attachment", back_populates="message")
     reads = relationship("MessageRead", back_populates="message")
+    reply_to = relationship(
+        "Message", foreign_keys=[reply_to_id], remote_side=[id], lazy="selectin"
+    )
+    reactions = relationship(
+        "MessageReaction", back_populates="message", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uq_message_reaction_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    message = relationship("Message", back_populates="reactions")
 
 
 class MessageRead(Base):

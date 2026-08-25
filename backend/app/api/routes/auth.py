@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import AccessTokenPayload, CurrentUser, DbSession
 from app.core.config import get_settings
@@ -87,3 +87,20 @@ async def forgot_password(
 async def reset_password(payload: ResetPasswordRequest, db: DbSession) -> Response:
     await auth_service.reset_password(db, payload.token, payload.new_password)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/sessions", response_model=list[dict])
+async def list_sessions(
+    current_user: CurrentUser,
+    db: DbSession,
+    token_payload: AccessTokenPayload,
+    current_jti: str | None = Query(default=None, max_length=36),
+) -> list[dict]:
+    return await auth_service.list_sessions(db, current_user.id, current_jti)
+
+
+@router.delete("/sessions/{jti}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(jti: str, current_user: CurrentUser, db: DbSession) -> None:
+    revoked = await auth_service.revoke_session(db, current_user.id, jti)
+    if not revoked:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")

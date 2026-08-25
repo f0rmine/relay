@@ -187,7 +187,12 @@ export const useMessagesStore = defineStore('messages', {
         timeoutMs: 120_000
       });
     },
-    async enqueue(conversationId: string, text: string, file: File | null = null) {
+    async enqueue(
+      conversationId: string,
+      text: string,
+      file: File | null = null,
+      replyToId: string | null = null
+    ) {
       const auth = useAuthStore();
       if (!auth.user) throw new Error('Authentication is required');
       const cleanText = text.trim();
@@ -205,6 +210,7 @@ export const useMessagesStore = defineStore('messages', {
           data: file
         } : null,
         uploadedAttachmentIds: [],
+        reply_to_id: replyToId,
         createdAt: new Date().toISOString(),
         state: 'queued',
         attemptCount: 0,
@@ -269,7 +275,8 @@ export const useMessagesStore = defineStore('messages', {
             client_message_id: entry.id,
             conversation_id: entry.conversationId,
             text: entry.text,
-            attachment_ids: entry.uploadedAttachmentIds
+            attachment_ids: entry.uploadedAttachmentIds,
+            ...(entry.reply_to_id ? { reply_to_id: entry.reply_to_id } : {})
           })
         });
         if (epoch !== lifecycleEpoch || useAuthStore().user?.id !== userId) return 'stale';
@@ -381,6 +388,9 @@ export const useMessagesStore = defineStore('messages', {
         method: 'PATCH',
         body: JSON.stringify({ text })
       });
+      this.upsert(message);
+    },
+    applyUpdated(message: Message) {
       this.upsert(message);
     },
     upsert(message: Message) {

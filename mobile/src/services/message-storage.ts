@@ -21,6 +21,7 @@ export interface OutboxEntry {
   text: string | null;
   attachment: StagedAttachment | null;
   uploadedAttachmentIds: string[];
+  reply_to_id?: string | null;
   createdAt: string;
   state: OutboxState;
   attemptCount: number;

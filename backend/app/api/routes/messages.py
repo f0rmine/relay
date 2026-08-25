@@ -9,6 +9,7 @@ from app.services.messages import (
     create_message_idempotent,
     delete_message_for_everyone,
     edit_message,
+    react_to_message,
 )
 from app.services.presence import is_online
 from app.services.push import schedule_message_push
@@ -34,6 +35,7 @@ async def send_message(
         payload.client_message_id,
         payload.text,
         payload.attachment_ids,
+        reply_to_id=payload.reply_to_id,
     )
     message_payload = serialize_message(message)
     if not created:
@@ -82,6 +84,26 @@ async def edit_message_endpoint(
             {"conversation_id": message.conversation_id, "latest_message": serialize_message(latest)},
         )
     return message_payload
+
+
+@router.put("/{message_id}/react", response_model=MessageOut)
+async def react_message(
+    message_id: str, payload: dict, current_user: CurrentUser, db: DbSession
+) -> dict:
+    from app.schemas.ws import MessageReactPayload
+
+    try:
+        parsed = MessageReactPayload.model_validate({"message_id": message_id, **payload})
+    except Exception as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid reaction") from exc
+    message = await react_to_message(db, message_id, current_user, parsed.emoji)
+    conversation = await require_participant(db, message.conversation_id, current_user.id)
+    participants = await conversation_participant_ids(conversation)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis, participants, "message:updated", serialize_message(message)
+    )
+    return serialize_message(message)
 
 
 @router.delete("/{message_id}", response_model=MessageOut)

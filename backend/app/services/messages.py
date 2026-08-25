@@ -17,7 +17,7 @@ from app.core.encryption import (
     message_text_associated_data,
 )
 from app.models.attachment import Attachment
-from app.models.message import Message
+from app.models.message import Message, MessageReaction
 from app.models.user import User
 from app.services.conversations import require_participant
 
@@ -76,11 +76,13 @@ async def create_message(
     text: str | None,
     attachment_ids: list[str] | None = None,
     client_message_id: str | None = None,
+    reply_to_id: str | None = None,
 ) -> Message:
     attachment_ids = attachment_ids or []
     await require_participant(db, conversation_id, user.id)
     if not (text and text.strip()) and not attachment_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Message text or attachment is required")
+    await validate_reply_target(db, conversation_id, reply_to_id)
     attachments: list[Attachment] = []
     if attachment_ids:
         attachments = list(
@@ -112,6 +114,7 @@ async def create_message(
         conversation_id=conversation_id,
         sender_id=user.id,
         client_message_id=client_message_id,
+        reply_to_id=reply_to_id,
         text=None,
         text_ciphertext=encrypted_text.ciphertext if encrypted_text else None,
         text_nonce=encrypted_text.nonce if encrypted_text else None,
@@ -131,8 +134,18 @@ async def create_message(
     if conversation:
         conversation.updated_at = datetime.now(UTC)
     await db.commit()
-    await db.refresh(message, attribute_names=["attachments", "reads"])
-    return message
+    return (
+        await db.scalars(
+            select(Message)
+            .options(
+                selectinload(Message.attachments),
+                selectinload(Message.reads),
+                selectinload(Message.reactions),
+                selectinload(Message.reply_to),
+            )
+            .where(Message.id == message.id)
+        )
+    ).one()
 
 
 async def create_message_idempotent(
@@ -142,6 +155,7 @@ async def create_message_idempotent(
     client_message_id: str,
     text: str | None,
     attachment_ids: list[str] | None = None,
+    reply_to_id: str | None = None,
 ) -> tuple[Message, bool]:
     query = (
         select(Message)
@@ -163,6 +177,7 @@ async def create_message_idempotent(
             text,
             attachment_ids,
             client_message_id=client_message_id,
+            reply_to_id=reply_to_id,
         )
         return message, True
     except IntegrityError:
@@ -223,8 +238,18 @@ async def delete_message_for_everyone(db: AsyncSession, message_id: str, user: U
     message.text_key_id = None
     message.encryption_version = None
     await db.commit()
-    await db.refresh(message, attribute_names=["attachments", "reads"])
-    return message
+    return (
+        await db.scalars(
+            select(Message)
+            .options(
+                selectinload(Message.attachments),
+                selectinload(Message.reads),
+                selectinload(Message.reactions),
+                selectinload(Message.reply_to),
+            )
+            .where(Message.id == message.id)
+        )
+    ).one()
 
 
 async def edit_message(db: AsyncSession, message_id: str, user: User, new_text: str) -> Message:
@@ -257,5 +282,118 @@ async def edit_message(db: AsyncSession, message_id: str, user: User, new_text: 
     message.edited_at = now
     message.updated_at = now
     await db.commit()
-    await db.refresh(message, attribute_names=["attachments", "reads"])
-    return message
+    return (
+        await db.scalars(
+            select(Message)
+            .options(
+                selectinload(Message.attachments),
+                selectinload(Message.reads),
+                selectinload(Message.reactions),
+                selectinload(Message.reply_to),
+            )
+            .where(Message.id == message.id)
+        )
+    ).one()
+
+
+async def react_to_message(
+    db: AsyncSession, message_id: str, user: User, emoji: str | None
+) -> Message:
+    message = (
+        await db.scalars(
+            select(Message)
+            .options(
+                selectinload(Message.attachments),
+                selectinload(Message.reads),
+                selectinload(Message.reactions),
+                selectinload(Message.reply_to),
+            )
+            .where(Message.id == message_id)
+        )
+    ).first()
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    await require_participant(db, message.conversation_id, user.id)
+    if message.deleted_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot react to a deleted message")
+    existing = (
+        await db.scalars(
+            select(MessageReaction).where(
+                MessageReaction.message_id == message_id,
+                MessageReaction.user_id == user.id,
+            )
+        )
+    ).first()
+    if not emoji:
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+    else:
+        emoji = emoji[:16]
+        if existing is not None:
+            existing.emoji = emoji
+        else:
+            db.add(MessageReaction(message_id=message_id, user_id=user.id, emoji=emoji))
+        await db.commit()
+    db.expunge(message)
+    return (
+        await db.scalars(
+            select(Message)
+            .options(
+                selectinload(Message.attachments),
+                selectinload(Message.reads),
+                selectinload(Message.reactions),
+                selectinload(Message.reply_to),
+            )
+            .where(Message.id == message_id)
+        )
+    ).one()
+
+
+async def validate_reply_target(db: AsyncSession, conversation_id: str, reply_to_id: str | None) -> None:
+    if reply_to_id is None:
+        return
+    target = (await db.scalars(select(Message).where(Message.id == reply_to_id))).first()
+    if (
+        target is None
+        or target.conversation_id != conversation_id
+        or target.deleted_at is not None
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid reply target")
+
+
+async def search_user_messages(
+    db: AsyncSession,
+    user: User,
+    query: str,
+    limit: int = 20,
+    per_conversation_scan: int = 500,
+) -> list[dict]:
+    from app.services.conversations import list_conversations
+
+    needle = query.lower().strip()
+    conversations = await list_conversations(db, user.id)
+    matches: list[dict] = []
+    for conversation in conversations:
+        candidates = (
+            await db.scalars(
+                select(Message)
+                .options(selectinload(Message.attachments), selectinload(Message.reads))
+                .where(
+                    Message.conversation_id == conversation.id,
+                    Message.deleted_at.is_(None),
+                )
+                .order_by(desc(Message.created_at), desc(Message.id))
+                .limit(per_conversation_scan)
+            )
+        ).all()
+        for message in candidates:
+            try:
+                text = plaintext_message_text(message)
+            except DecryptionError:
+                continue
+            if text and needle in text.lower():
+                matches.append(message)
+                if len(matches) >= limit:
+                    return matches
+    return matches

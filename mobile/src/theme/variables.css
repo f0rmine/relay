@@ -50,3 +50,19 @@ ion-item {
   border: 1px solid var(--relay-border);
   border-radius: 8px;
 }
+
+body.theme-light {
+  color-scheme: light;
+  --ion-background-color: #f4f6fa;
+  --ion-text-color: #16222f;
+  --ion-toolbar-background: #ffffff;
+  --ion-tab-bar-background: #ffffff;
+  --ion-item-background: #ffffff;
+  --relay-panel: #ffffff;
+  --relay-bubble-own: #d7ecff;
+  --relay-bubble-peer: #ffffff;
+  --relay-border: #dbe3ec;
+  --relay-muted: #5b6b7d;
+  --relay-surface: #eef2f7;
+  --relay-input: #eef2f7;
+}

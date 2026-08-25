@@ -280,3 +280,50 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
         refresh_token.revoked_at = now
     await db.commit()
     await revoke_all_access_tokens(user.id)
+
+
+async def list_sessions(
+    db: AsyncSession, user_id: str, current_jti: str | None = None
+) -> list[dict]:
+    now = datetime.now(UTC)
+    rows = (
+        await db.scalars(
+            select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .order_by(RefreshToken.created_at.desc())
+        )
+    ).all()
+    return [
+        {
+            "jti": row.jti,
+            "short_id": (row.jti or row.id)[:8],
+            "created_at": row.created_at.isoformat(),
+            "expires_at": row.expires_at.isoformat(),
+            "current": bool(row.jti and row.jti == current_jti),
+            "legacy": row.jti is None,
+        }
+        for row in rows
+    ]
+
+
+async def revoke_session(db: AsyncSession, user_id: str, jti: str) -> bool:
+    row = (
+        await db.scalars(
+            select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.jti == jti,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+    ).first()
+    if row is None:
+        return False
+    row.revoked_at = datetime.now(UTC)
+    await db.commit()
+    return True

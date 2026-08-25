@@ -3,25 +3,55 @@
     <ion-buttons slot="start">
       <ion-back-button default-href="/conversations" text="" />
     </ion-buttons>
-    <div class="chat-title">
-      <Avatar :name="peer?.display_name || t('common.user')" :url="peer?.avatar_url" :size="34" />
+    <div class="chat-title" @click="openInfo">
+      <Avatar :name="title || t('common.user')" :url="group ? undefined : peer?.avatar_url" :size="34" />
       <div>
-        <strong>{{ peer?.display_name || t('common.chat') }}</strong>
-        <OnlineStatusBadge :online="peer?.is_online" :last-seen="peer?.last_seen_at" />
+        <strong>{{ title }}</strong>
+        <OnlineStatusBadge
+          v-if="!group"
+          :online="peer?.is_online"
+          :last-seen="peer?.last_seen_at"
+        />
+        <span v-else class="members">{{ membersLabel }}</span>
       </div>
     </div>
+    <ion-buttons v-if="group" slot="end">
+      <ion-button @click="goInfo" :aria-label="t('groups.info')">
+        <ion-icon :icon="informationCircleOutline" />
+      </ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </template>
 
 <script setup lang="ts">
-import { IonBackButton, IonButtons, IonToolbar } from '@ionic/vue';
-import type { User } from '@/api/types';
+import { computed } from 'vue';
+import { useRouter } from 'vue-router';
+import { IonBackButton, IonButton, IonButtons, IonIcon, IonToolbar } from '@ionic/vue';
+import { informationCircleOutline } from 'ionicons/icons';
+import type { Conversation, User } from '@/api/types';
 import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/users/Avatar.vue';
 import OnlineStatusBadge from '@/components/users/OnlineStatusBadge.vue';
 
-defineProps<{ peer?: User }>();
+const props = defineProps<{ peer?: User; conversation?: Conversation | null }>();
+const router = useRouter();
 const { t } = useI18n();
+
+const group = computed(() => props.conversation?.kind === 'group');
+const title = computed(() =>
+  group.value ? props.conversation?.title || t('conversations.groupChat') : props.peer?.display_name || t('common.chat')
+);
+const membersLabel = computed(() => {
+  const count = props.conversation?.participants?.length || 0;
+  return `${count} ${t('groups.members')}`;
+});
+
+function goInfo() {
+  if (props.conversation) void router.push(`/chat/${props.conversation.id}/info`);
+}
+function openInfo() {
+  if (group.value) goInfo();
+}
 </script>
 
 <style scoped>
@@ -38,5 +68,9 @@ const { t } = useI18n();
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.members {
+  font-size: 12px;
+  color: var(--relay-muted);
 }
 </style>

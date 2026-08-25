@@ -1,3 +1,4 @@
+import { setUnreadBadge } from '@/services/badge';
 import { defineStore } from 'pinia';
 import { apiFetch } from '@/api/client';
 import type { Conversation, Message, User } from '@/api/types';
@@ -13,6 +14,11 @@ export const useConversationsStore = defineStore('conversations', {
     loading: false
   }),
   actions: {
+    syncBadge() {
+      const total = this.items.reduce((sum, item) => sum + (item.unread_count || 0), 0);
+      void setUnreadBadge(total);
+    },
+
     reset() {
       this.items = [];
       this.loading = false;
@@ -38,6 +44,17 @@ export const useConversationsStore = defineStore('conversations', {
       if (index >= 0) this.items[index] = conversation;
       else this.items.unshift(conversation);
       this.sort();
+      void this.syncBadge();
+    },
+    removeLocal(conversationId: string) {
+      this.items = this.items.filter((item) => item.id !== conversationId);
+    },
+    applyConversationInfo(conversation: Conversation) {
+      const index = this.items.findIndex((item) => item.id === conversation.id);
+      if (index >= 0) this.items[index] = conversation;
+      else this.items.unshift(conversation);
+      this.sort();
+      void this.syncBadge();
     },
     applyLatest(conversationId: string, latestMessage: Message) {
       const item = this.items.find((conversation) => conversation.id === conversationId);
@@ -51,6 +68,7 @@ export const useConversationsStore = defineStore('conversations', {
       item.latest_message = latestMessage;
       item.updated_at = latestMessage.created_at;
       this.sort();
+      void this.syncBadge();
     },
     applyIncomingMessage(message: Message, currentUserId?: string, activeConversationId?: string) {
       const item = this.items.find((conversation) => conversation.id === message.conversation_id);

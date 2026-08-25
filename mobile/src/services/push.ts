@@ -51,8 +51,8 @@ export async function initPushNotifications(): Promise<void> {
     });
 
     await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
-      const conversationId = event.notification.data?.conversation_id;
-      if (conversationId) openConversation(conversationId);
+      const data = event.notification.data ?? {};
+      if (data.conversation_id) openConversation(data.conversation_id, data.message_id);
     });
   }
 

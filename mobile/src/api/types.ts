@@ -36,16 +36,31 @@ export interface Message {
   read_by: string[];
   request_id?: string;
   delivery_state?: 'queued' | 'sending' | 'failed';
+  reactions?: Array<{ emoji: string; user_ids: string[] }>;
+  reply_to?: { id: string; text?: string | null; sender_id: string; undecryptable?: boolean } | null;
 }
 
 export interface Conversation {
   id: string;
   kind: string;
+  title?: string | null;
+  is_admin?: boolean;
+  admin_ids?: string[];
+  pinned_message_id?: string | null;
   participants: User[];
   latest_message?: Message | null;
   unread_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionInfo {
+  jti?: string | null;
+  short_id: string;
+  created_at: string;
+  expires_at: string;
+  current: boolean;
+  legacy: boolean;
 }
 
 export interface TokenResponse {

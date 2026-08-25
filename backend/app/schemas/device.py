@@ -12,3 +12,8 @@ class DeviceTokenRegister(BaseModel):
 
 class DeviceTokenRemove(BaseModel):
     token: str = Field(min_length=20, max_length=500)
+
+
+class DeviceKeyRegister(BaseModel):
+    public_key: str = Field(min_length=16, max_length=200)
+    device_label: str | None = Field(default=None, max_length=120)

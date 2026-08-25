@@ -7,7 +7,7 @@ from app.core.config import Settings
 
 
 def encoded_key() -> str:
-    return base64.b64encode(bytes(range(32))).decode()
+    return base64.b64encode(b"ci-only-encryption-key-32bytes!!").decode()
 
 
 def settings_kwargs() -> dict:
@@ -27,7 +27,9 @@ def test_security_settings_reject_weak_or_shared_jwt_secrets() -> None:
         Settings(**settings_kwargs(), jwt_secret=shared, jwt_refresh_secret=shared)
 
 
-def test_production_settings_reject_debug_reset_tokens_and_defaults() -> None:
+def test_production_settings_reject_debug_reset_tokens_and_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("ENCRYPTION_ACTIVE_KEY_ID", raising=False)
+    monkeypatch.delenv("ENCRYPTION_KEYS", raising=False)
     with pytest.raises(ValidationError, match="development defaults"):
         Settings(
             **settings_kwargs(),

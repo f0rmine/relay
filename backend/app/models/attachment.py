@@ -25,6 +25,10 @@ class Attachment(Base):
     encryption_nonce: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     encryption_key_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     encryption_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumb_path: Mapped[str | None] = mapped_column(String(700), nullable=True)
+    thumb_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumb_w: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumb_h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     message = relationship("Message", back_populates="attachments")
