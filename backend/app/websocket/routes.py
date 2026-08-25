@@ -25,7 +25,11 @@ from app.schemas.ws import (
     WebSocketEnvelope,
 )
 from app.services.conversations import latest_message, mark_conversation_read, require_participant
-from app.services.messages import create_message_idempotent, delete_message_for_everyone, edit_message
+from app.services.messages import (
+    create_message_idempotent,
+    delete_message_for_everyone,
+    edit_message,
+)
 from app.services.presence import clear_typing, is_online, set_offline, set_online, set_typing
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
@@ -85,7 +89,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     async with AsyncSessionLocal() as db:
         try:
             user = await authenticate_websocket(db, websocket)
-        except (asyncio.TimeoutError, ValueError, ValidationError):
+        except (TimeoutError, ValueError, ValidationError):
             await send_error(websocket, "Authentication required")
             await websocket.close(code=1008)
             return
@@ -125,7 +129,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 except ValidationError:
                     await db.rollback()
                     await send_error(websocket, "Invalid event payload", request_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     await db.rollback()
                     await send_error(websocket, "Unable to process event", request_id)
         except WebSocketDisconnect:

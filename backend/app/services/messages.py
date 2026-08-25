@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.encryption import (
-    DecryptionError,
     ENCRYPTION_VERSION,
+    DecryptionError,
     get_encryption_keyring,
     message_text_associated_data,
 )

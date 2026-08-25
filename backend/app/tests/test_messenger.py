@@ -1,10 +1,9 @@
 import json
-from datetime import UTC, datetime, timedelta
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
-
 from httpx import AsyncClient
 from sqlalchemy import select, update
 
@@ -403,7 +402,7 @@ async def test_private_conversation_message_read_and_delete(client: AsyncClient,
         message_id = message.id
         break
 
-    with open(stored_path, "rb") as stored_file:
+    with open(stored_path, "rb") as stored_file:  # noqa: ASYNC230
         assert stored_file.read() != b"hello"
 
     public_static_file = await client.get(f"/uploads/attachments/{stored_filename}")
@@ -1040,8 +1039,8 @@ async def test_fcm_missing_service_account_path_skips_delivery(monkeypatch, tmp_
 
 
 async def test_fcm_credential_error_is_push_only(monkeypatch, client: AsyncClient) -> None:
-    from app.main import app
     from app.core.database import get_db
+    from app.main import app
     from app.models.user import User
     from app.services import push
     from app.services.messages import create_message

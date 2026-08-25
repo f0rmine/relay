@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -62,7 +64,9 @@ async def update_profile(payload: ProfileUpdate, current_user: CurrentUser, db: 
 
 @router.post("/me/avatar", response_model=UserPublic)
 async def upload_avatar(
-    current_user: CurrentUser, db: DbSession, file: UploadFile = File(...)
+    current_user: CurrentUser,
+    db: DbSession,
+    file: Annotated[UploadFile, File(...)],
 ) -> UserPublic:
     user = await save_avatar(db, current_user, file)
     return UserPublic.model_validate(user)

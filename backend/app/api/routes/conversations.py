@@ -17,8 +17,7 @@ from app.services.conversations import (
 )
 from app.services.messages import decode_message_cursor, encode_message_cursor, list_messages
 from app.services.presence import online_map
-from app.websocket.events import serialize_message
-from app.websocket.events import conversation_participant_ids
+from app.websocket.events import conversation_participant_ids, serialize_message
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])

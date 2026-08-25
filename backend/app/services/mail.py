@@ -65,6 +65,6 @@ async def send_password_reset_email(recipient: str, token: str) -> None:
 async def deliver_password_reset_email(recipient: str, token: str) -> None:
     try:
         await send_password_reset_email(recipient, token)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Do not leak the reset token, recipient, SMTP response, or credentials to logs.
         logger.warning("Password reset email delivery failed (%s)", type(exc).__name__)

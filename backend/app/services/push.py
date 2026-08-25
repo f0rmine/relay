@@ -199,7 +199,7 @@ async def send_message_push(
             return
         try:
             access_token = await _access_token()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             if _pause_fcm_config_errors():
                 logger.warning(
                     "FCM push attempts paused for %s seconds after credential error: %s",

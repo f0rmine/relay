@@ -4,7 +4,11 @@ from app.api.deps import CurrentUser, DbSession
 from app.core.redis import get_redis
 from app.schemas.message import MessageCreate, MessageEdit, MessageOut
 from app.services.conversations import latest_message, require_participant
-from app.services.messages import create_message_idempotent, delete_message_for_everyone, edit_message
+from app.services.messages import (
+    create_message_idempotent,
+    delete_message_for_everyone,
+    edit_message,
+)
 from app.services.presence import is_online
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message

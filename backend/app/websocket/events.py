@@ -1,4 +1,5 @@
 from fastapi.encoders import jsonable_encoder
+
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.attachment import AttachmentOut

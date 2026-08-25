@@ -1,6 +1,5 @@
 from fastapi import HTTPException, UploadFile, status
 
-
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 

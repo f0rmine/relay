@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.encryption import (
-    DecryptionError,
     ENCRYPTION_VERSION,
+    DecryptionError,
     attachment_associated_data,
     get_encryption_keyring,
 )
@@ -56,7 +56,7 @@ def sniff_image_type(data: bytes) -> str | None:
         return "image/jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
-    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+    if data.startswith((b"GIF87a", b"GIF89a")):
         return "image/gif"
     if len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
