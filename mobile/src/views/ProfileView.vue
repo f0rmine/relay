@@ -27,22 +27,52 @@
         </ion-item>
       </ion-list>
       <ion-button expand="block" class="action" :disabled="saving" @click="save">{{ t('profile.save') }}</ion-button>
+
+      <div class="section-row">
+        <span>{{ t('profile.theme') }}</span>
+        <ion-toggle :checked="theme === 'light'" @ionChange="toggleTheme" />
+      </div>
+
+      <h3 class="section">{{ t('sessions.title') }}</h3>
+      <ErrorState v-if="sessionsError" :message="sessionsError" />
+      <ion-list class="profile-list">
+        <ion-item v-for="session in sessions" :key="session.short_id">
+          <ion-label>
+            <h3>{{ session.current ? t('sessions.current') : session.short_id }}</h3>
+            <p>{{ new Date(session.created_at).toLocaleDateString() }}</p>
+          </ion-label>
+          <ion-button
+            v-if="!session.current"
+            slot="end"
+            fill="clear"
+            color="danger"
+            size="small"
+            @click="revokeSession(session)"
+          >
+            {{ t('sessions.revoke') }}
+          </ion-button>
+        </ion-item>
+      </ion-list>
+
       <ion-button expand="block" fill="clear" color="danger" @click="logout">{{ t('profile.logout') }}</ion-button>
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem, IonList, IonPage, IonTitle, IonToolbar } from '@ionic/vue';
+import { IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem, IonLabel, IonList, IonPage, IonTitle, IonToggle, IonToolbar } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import { apiFetch, displayError } from '@/api/client';
 import type { User } from '@/api/types';
 import ErrorState from '@/components/ErrorState.vue';
 import Avatar from '@/components/users/Avatar.vue';
 import LanguageSelector from '@/components/LanguageSelector.vue';
+import type { SessionInfo } from '@/api/types';
 import { useAuthStore } from '@/stores/auth';
+import { applyTheme, currentTheme, setTheme, type ThemeName } from '@/services/theme';
+import { decodeJwtPayload } from '@/services/jwt';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -58,6 +88,41 @@ onMounted(() => {
   displayName.value = auth.user?.display_name || '';
   email.value = auth.user?.email || '';
 });
+
+const theme = ref<ThemeName>(currentTheme());
+const sessions = ref<SessionInfo[]>([]);
+const sessionsError = ref('');
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light';
+  setTheme(theme.value);
+}
+
+async function loadSessions() {
+  if (!auth.refreshToken) return;
+  try {
+    const payload = decodeJwtPayload(auth.refreshToken);
+    const jti = typeof payload.jti === 'string' ? payload.jti : undefined;
+    sessions.value = await apiFetch<SessionInfo[]>(
+      `/auth/sessions${jti ? `?current_jti=${encodeURIComponent(jti)}` : ''}`
+    );
+  } catch {
+    sessions.value = [];
+  }
+}
+
+async function revokeSession(session: SessionInfo) {
+  if (!session.jti) return;
+  sessionsError.value = '';
+  try {
+    await apiFetch(`/auth/sessions/${session.jti}`, { method: 'DELETE' });
+    sessions.value = sessions.value.filter((entry) => entry.jti !== session.jti);
+  } catch (err: unknown) {
+    sessionsError.value = displayError(err, t('sessions.revokeFailed'));
+  }
+}
+
+void loadSessions();
 
 async function save() {
   saving.value = true;

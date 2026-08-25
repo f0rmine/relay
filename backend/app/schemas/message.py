@@ -11,6 +11,7 @@ class MessageCreate(BaseModel):
     client_message_id: str = Field(min_length=1, max_length=100)
     text: str | None = Field(default=None, max_length=4000)
     attachment_ids: list[str] = Field(default_factory=list, max_length=5)
+    reply_to_id: str | None = Field(default=None, max_length=36)
 
     @model_validator(mode="after")
     def validate_content(self) -> "MessageCreate":
@@ -19,6 +20,18 @@ class MessageCreate(BaseModel):
         if self.text:
             self.text = self.text.strip()
         return self
+
+
+class ReactionOut(BaseModel):
+    emoji: str
+    user_ids: list[str] = Field(default_factory=list)
+
+
+class ReplyToOut(BaseModel):
+    id: str
+    text: str | None = None
+    sender_id: str
+    undecryptable: bool = False
 
 
 class MessageOut(OrmModel):
@@ -35,6 +48,8 @@ class MessageOut(OrmModel):
     deleted_by_id: str | None
     attachments: list[AttachmentOut] = Field(default_factory=list)
     read_by: list[str] = Field(default_factory=list)
+    reactions: list[ReactionOut] = Field(default_factory=list)
+    reply_to: ReplyToOut | None = None
 
 
 class MessageEdit(BaseModel):

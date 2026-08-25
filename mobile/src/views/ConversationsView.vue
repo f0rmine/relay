@@ -4,7 +4,9 @@
       <ion-toolbar>
         <ion-title>{{ t('conversations.title') }}</ion-title>
         <ion-buttons slot="end">
+          <ion-button router-link="/message-search" :aria-label="t('messageSearch.title')"><ion-icon :icon="documentTextOutline" /></ion-button>
           <ion-button router-link="/search" :aria-label="t('conversations.search')"><ion-icon :icon="searchOutline" /></ion-button>
+          <ion-button router-link="/groups/new" :aria-label="t('groups.newTitle')"><ion-icon :icon="peopleOutline" /></ion-button>
           <ion-button router-link="/profile" :aria-label="t('conversations.profile')"><ion-icon :icon="personCircleOutline" /></ion-button>
         </ion-buttons>
       </ion-toolbar>
@@ -20,7 +22,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonPage, IonTitle, IonToolbar, onIonViewWillEnter } from '@ionic/vue';
-import { personCircleOutline, searchOutline } from 'ionicons/icons';
+import { documentTextOutline, peopleOutline, personCircleOutline, searchOutline } from 'ionicons/icons';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { displayError } from '@/api/client';

@@ -26,6 +26,12 @@ class MessageSendPayload(BaseModel):
     client_message_id: str | None = Field(default=None, min_length=1, max_length=100)
     text: str | None = Field(default=None, max_length=4000)
     attachment_ids: list[str] = Field(default_factory=list, max_length=5)
+    reply_to_id: str | None = Field(default=None, max_length=36)
+
+
+class MessageReactPayload(BaseModel):
+    message_id: str
+    emoji: str | None = Field(default=None, min_length=1, max_length=16)
 
 
 class MessageDeletePayload(BaseModel):

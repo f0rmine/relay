@@ -1,5 +1,12 @@
 <template>
   <div class="composer">
+    <div v-if="replyMessage" class="edit-bar">
+      <ion-icon :icon="returnDownForwardOutline" class="edit-icon" />
+      <span class="edit-label">{{ t('chat.reply') }} · {{ replyMessage.text || t('chat.imageUnavailable') }}</span>
+      <ion-button fill="clear" class="cancel-edit" @click="$emit('reply-cancel')" :aria-label="t('chat.cancelEdit')">
+        <ion-icon :icon="closeOutline" />
+      </ion-button>
+    </div>
     <div v-if="editingMessage" class="edit-bar">
       <ion-icon :icon="createOutline" class="edit-icon" />
       <span class="edit-label">{{ t('chat.editMessage') }}</span>
@@ -29,8 +36,19 @@
           @blur="onBlur"
         ></textarea>
       </div>
-      <ion-button class="send-button" shape="round" :disabled="!canSend || sending" @click="submit" :aria-label="editingMessage ? t('chat.editMessage') : t('chat.sendMessage')">
-        <ion-icon :icon="editingMessage ? checkmarkOutline : paperPlaneOutline" />
+      <ion-button
+        v-if="!editingMessage && !canSend && !recording"
+        fill="clear"
+        shape="round"
+        class="attach-button"
+        @click="toggleRecording"
+        :aria-label="t('chat.recordVoice')"
+      >
+        <ion-icon :icon="micOutline" :color="recording ? 'danger' : undefined" />
+      </ion-button>
+      <span v-if="recording" class="record-timer">{{ recordSeconds }}s</span>
+      <ion-button class="send-button" shape="round" :disabled="(!canSend && !recording) || sending" @click="submit" :aria-label="editingMessage ? t('chat.editMessage') : t('chat.sendMessage')">
+        <ion-icon :icon="recording ? stopOutline : editingMessage ? checkmarkOutline : paperPlaneOutline" />
       </ion-button>
     </div>
   </div>
@@ -39,7 +57,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { IonButton, IonIcon } from '@ionic/vue';
-import { attachOutline, paperPlaneOutline, closeOutline, createOutline, checkmarkOutline } from 'ionicons/icons';
+import { attachOutline, paperPlaneOutline, closeOutline, createOutline, checkmarkOutline, micOutline, stopOutline, returnDownForwardOutline } from 'ionicons/icons';
 import { useI18n } from 'vue-i18n';
 import AttachmentPreview from './AttachmentPreview.vue';
 
@@ -48,15 +66,82 @@ export interface EditingMessage {
   text: string;
 }
 
-const props = defineProps<{ sending?: boolean; editingMessage?: EditingMessage | null }>();
+const props = defineProps<{
+  sending?: boolean;
+  editingMessage?: EditingMessage | null;
+  replyMessage?: import('@/api/types').Message | null;
+  initialValue?: string;
+}>();
 const emit = defineEmits<{
   send: [text: string, file: File | null, complete: (accepted: boolean) => void];
   typing: [active: boolean];
   edit: [text: string, complete: (accepted: boolean) => void];
   'cancel-edit': [];
+  'reply-cancel': [];
+  draft: [text: string];
 }>();
-const text = ref('');
+const text = ref(props.initialValue || '');
 const file = ref<File | null>(null);
+const recording = ref(false);
+const recordSeconds = ref(0);
+let mediaRecorder: MediaRecorder | null = null;
+let recordedChunks: BlobPart[] = [];
+let recordStream: MediaStream | null = null;
+let recordTimer: number | null = null;
+
+watch(
+  () => props.initialValue,
+  (value) => {
+    if (typeof value === 'string') {
+      text.value = value;
+      requestAnimationFrame(resizeInput);
+    }
+  }
+);
+
+watch(text, (value) => emit('draft', value));
+
+async function toggleRecording() {
+  if (recording.value) {
+    mediaRecorder?.stop();
+    return;
+  }
+  try {
+    recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordedChunks = [];
+    const mimeCandidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+    const mimeType = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+    mediaRecorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : undefined);
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size) recordedChunks.push(event.data);
+    };
+    mediaRecorder.onstop = finishRecording;
+    mediaRecorder.start();
+    recording.value = true;
+    recordSeconds.value = 0;
+    recordTimer = window.setInterval(() => {
+      recordSeconds.value += 1;
+    }, 1000);
+  } catch {
+    // microphone unavailable or permission denied
+  }
+}
+
+function finishRecording() {
+  if (recordTimer !== null) {
+    window.clearInterval(recordTimer);
+    recordTimer = null;
+  }
+  recordStream?.getTracks().forEach((track) => track.stop());
+  recordStream = null;
+  recording.value = false;
+  if (!recordedChunks.length) return;
+  const type = mediaRecorder?.mimeType || 'audio/webm';
+  const extension = type.includes('mp4') ? 'm4a' : 'webm';
+  const voiceFile = new File(recordedChunks, `voice-${Date.now()}.${extension}`, { type });
+  file.value = voiceFile;
+  submit();
+}
 const fileInput = ref<HTMLInputElement | null>(null);
 const textInput = ref<HTMLTextAreaElement | null>(null);
 const canSend = computed(() => text.value.trim().length > 0 || file.value);
@@ -100,7 +185,10 @@ function stopTyping() {
   }
 }
 
-onBeforeUnmount(stopTyping);
+onBeforeUnmount(() => {
+  stopTyping();
+  if (recording.value) mediaRecorder?.stop();
+});
 
 function onFocus() {
   if (typingStopTimer) {
@@ -137,6 +225,10 @@ function submit() {
       requestAnimationFrame(resizeInput);
     });
   } else {
+    if (recording.value) {
+      mediaRecorder?.stop();
+      return;
+    }
     emit('send', text.value, file.value, (accepted) => {
       if (!accepted) return;
       text.value = '';
@@ -179,6 +271,10 @@ function submit() {
   --padding-end: 0;
   --color: var(--relay-muted);
   margin: 0;
+}
+.record-timer {
+  font-size: 12px;
+  color: #ff8a80;
 }
 .bar {
   display: grid;

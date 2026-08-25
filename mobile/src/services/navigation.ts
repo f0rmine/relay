@@ -3,8 +3,10 @@ export function activeConversationId(): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
-export function openConversation(conversationId: string): void {
+export function openConversation(conversationId: string, messageId?: string): void {
   window.dispatchEvent(
-    new CustomEvent('relay:open-conversation', { detail: { conversationId } })
+    new CustomEvent('relay:open-conversation', {
+      detail: { conversationId, messageId }
+    })
   );
 }

@@ -1,5 +1,5 @@
 <template>
-  <img v-if="imageUrl" class="image" :src="imageUrl" :alt="attachment.original_filename" @click="emit('click', imageUrl)" />
+  <img v-if="imageUrl" class="image" :src="imageUrl" :alt="attachment.original_filename" @click.stop="emit('open', attachment.id)" />
   <div v-else class="image placeholder">{{ t('chat.imageUnavailable') }}</div>
 </template>
 
@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n';
 import type { Attachment } from '@/api/types';
 
 const props = defineProps<{ attachment: Attachment }>();
-const emit = defineEmits<{ click: [url: string] }>();
+const emit = defineEmits<{ open: [attachmentId: string] }>();
 const imageUrl = ref('');
 let objectUrl = '';
 let loadSequence = 0;
@@ -32,7 +32,7 @@ watch(
       return;
     }
     try {
-      const blob = await apiBlob(`/attachments/${attachmentId}/download`);
+      const blob = await apiBlob(`/attachments/${attachmentId}/download?variant=thumb`);
       if (sequence !== loadSequence) return;
       objectUrl = URL.createObjectURL(blob);
       imageUrl.value = objectUrl;
@@ -55,6 +55,7 @@ onUnmounted(() => {
   border-radius: 8px;
   display: block;
   margin-top: 6px;
+  cursor: pointer;
 }
 .placeholder {
   display: grid;

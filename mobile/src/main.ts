@@ -18,6 +18,7 @@ import { useMessagesStore } from './stores/messages';
 import { useSocketStore } from './stores/socket';
 import { i18n, translate } from './i18n';
 import { registerPasswordRecoveryLinks } from './services/password-recovery-links';
+import { applyTheme, currentTheme } from './services/theme';
 
 const pinia = createPinia();
 const app = createApp(App).use(pinia).use(i18n).use(IonicVue).use(router);
@@ -44,8 +45,13 @@ router.isReady().then(() => {
 });
 
 window.addEventListener('relay:open-conversation', (event) => {
-  const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
-  if (conversationId) router.push(`/chat/${conversationId}`);
+  const detail = (event as CustomEvent<{ conversationId?: string; messageId?: string }>).detail;
+  if (detail?.conversationId) {
+    router.push({
+      path: `/chat/${detail.conversationId}`,
+      query: detail.messageId ? { m: detail.messageId } : undefined
+    });
+  }
 });
 
 window.addEventListener('relay:auth-expired', () => {
@@ -53,6 +59,8 @@ window.addEventListener('relay:auth-expired', () => {
     router.replace('/login');
   }
 });
+
+applyTheme(currentTheme());
 
 let lastMainBackPressAt = 0;
 

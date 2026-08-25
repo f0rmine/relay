@@ -6,7 +6,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.device import DeviceToken
-from app.schemas.device import DeviceTokenRegister, DeviceTokenRemove
+from app.models.user_device import UserDevice
+from app.schemas.device import DeviceKeyRegister, DeviceTokenRegister, DeviceTokenRemove
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -69,3 +70,41 @@ async def remove_push_token(
     if existing:
         existing.enabled = False
         await db.commit()
+
+
+@router.put("/keys", status_code=status.HTTP_204_NO_CONTENT)
+async def register_device_key(
+    payload: DeviceKeyRegister, current_user: CurrentUser, db: DbSession
+) -> None:
+    existing = (
+        await db.scalars(
+            select(UserDevice).where(
+                UserDevice.user_id == current_user.id,
+                UserDevice.public_key == payload.public_key,
+            )
+        )
+    ).first()
+    if existing:
+        existing.device_label = payload.device_label
+    else:
+        db.add(
+            UserDevice(
+                user_id=current_user.id,
+                public_key=payload.public_key,
+                device_label=payload.device_label,
+            )
+        )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+
+
+@router.get("/keys/{user_id}", response_model=list[dict])
+async def list_device_keys(user_id: str, current_user: CurrentUser, db: DbSession) -> list[dict]:
+    rows = (
+        await db.scalars(select(UserDevice).where(UserDevice.user_id == user_id))
+    ).all()
+    return [
+        {"public_key": row.public_key, "device_label": row.device_label} for row in rows
+    ]

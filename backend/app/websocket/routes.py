@@ -33,6 +33,7 @@ from app.services.messages import (
     create_message_idempotent,
     delete_message_for_everyone,
     edit_message,
+    react_to_message,
 )
 from app.services.presence import clear_typing, is_online, set_offline, set_online, set_typing
 from app.services.push import schedule_message_push
@@ -240,6 +241,7 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
             client_message_id,
             payload.text,
             payload.attachment_ids,
+            reply_to_id=payload.reply_to_id,
         )
         message_payload = serialize_message(message)
         message_payload["request_id"] = client_message_id
@@ -294,6 +296,18 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
                 "conversation:updated",
                 {"conversation_id": message.conversation_id, "latest_message": serialize_message(latest)},
             )
+        return
+
+    if envelope.type == "message:react":
+        from app.schemas.ws import MessageReactPayload
+
+        parsed = MessageReactPayload.model_validate(envelope.payload)
+        message = await react_to_message(db, parsed.message_id, user, parsed.emoji)
+        conversation = await require_participant(db, message.conversation_id, user.id)
+        participants = await conversation_participant_ids(conversation)
+        await manager.broadcast_to_users(
+            redis, participants, "message:updated", serialize_message(message)
+        )
         return
 
     if envelope.type == "message:read":

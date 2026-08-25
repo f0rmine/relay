@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, desc, func, or_, select
@@ -89,7 +90,7 @@ async def latest_message(db: AsyncSession, conversation_id: str) -> Message | No
     return (
         await db.scalars(
             select(Message)
-            .options(selectinload(Message.attachments), selectinload(Message.reads))
+            .options(selectinload(Message.attachments), selectinload(Message.reads), selectinload(Message.reactions), selectinload(Message.reply_to))
             .where(Message.conversation_id == conversation_id)
             .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
@@ -120,7 +121,7 @@ async def latest_messages(
             select(Message)
             .join(ranked, ranked.c.message_id == Message.id)
             .where(ranked.c.position == 1)
-            .options(selectinload(Message.attachments), selectinload(Message.reads))
+            .options(selectinload(Message.attachments), selectinload(Message.reads), selectinload(Message.reactions), selectinload(Message.reply_to))
         )
     ).unique().all()
     return {message.conversation_id: message for message in rows}
@@ -218,3 +219,117 @@ async def mark_conversation_read(db: AsyncSession, conversation_id: str, user_id
     )
     await db.commit()
     return message_ids
+
+
+async def create_group_conversation(
+    db: AsyncSession, creator_id: str, title: str, participant_ids: list[str]
+) -> Conversation:
+    unique_ids = [pid for pid in dict.fromkeys(participant_ids) if pid != creator_id]
+    if len(unique_ids) < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Group needs at least two other participants")
+    found = (await db.scalars(select(User).where(User.id.in_(unique_ids)))).all()
+    if len(found) != len(unique_ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    conversation = Conversation(kind="group", title=title.strip()[:120] or None, private_key=f"group:{uuid4()}")
+    db.add(conversation)
+    await db.flush()
+    db.add(ConversationParticipant(conversation_id=conversation.id, user_id=creator_id, is_admin=True))
+    for user_id in unique_ids:
+        db.add(ConversationParticipant(conversation_id=conversation.id, user_id=user_id))
+    await db.commit()
+    return await require_participant(db, conversation.id, creator_id)
+
+
+def participant_for(conversation: Conversation, user_id: str) -> ConversationParticipant:
+    for participant in conversation.participants:
+        if participant.user_id == user_id:
+            return participant
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
+
+
+async def require_group_admin(db: AsyncSession, conversation_id: str, user_id: str) -> Conversation:
+    conversation = await require_participant(db, conversation_id, user_id)
+    if conversation.kind != "group":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Not a group conversation")
+    if not participant_for(conversation, user_id).is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only group admins can do this")
+    return conversation
+
+
+async def rename_group(db: AsyncSession, conversation: Conversation, title: str) -> Conversation:
+    conversation.title = title.strip()[:120] or None
+    conversation.updated_at = datetime.now(UTC)
+    await db.commit()
+    return conversation
+
+
+async def add_group_participants(
+    db: AsyncSession, conversation: Conversation, participant_ids: list[str]
+) -> list[str]:
+    existing = {participant.user_id for participant in conversation.participants}
+    wanted = [pid for pid in dict.fromkeys(participant_ids) if pid not in existing]
+    added: list[str] = []
+    for user_id in wanted:
+        if await db.get(User, user_id) is None:
+            continue
+        db.add(ConversationParticipant(conversation_id=conversation.id, user_id=user_id))
+        added.append(user_id)
+    if added:
+        conversation.updated_at = datetime.now(UTC)
+        await db.commit()
+    return added
+
+
+async def remove_group_participant(
+    db: AsyncSession, conversation: Conversation, target_user_id: str
+) -> None:
+    participant = next(
+        (p for p in conversation.participants if p.user_id == target_user_id), None
+    )
+    if participant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    await db.delete(participant)
+    await db.commit()
+
+
+async def leave_conversation(db: AsyncSession, conversation_id: str, user_id: str) -> str:
+    conversation = await require_participant(db, conversation_id, user_id)
+    me = participant_for(conversation, user_id)
+    remaining = [p for p in conversation.participants if p.user_id != user_id]
+    await db.delete(me)
+    await db.commit()
+    if not remaining:
+        await db.delete(conversation)
+        await db.commit()
+        return "deleted"
+    if conversation.kind == "group" and me.is_admin:
+        successor = min(remaining, key=lambda p: p.joined_at)
+        successor.is_admin = True
+        await db.commit()
+    return "left"
+
+
+async def set_pinned_message(
+    db: AsyncSession, conversation: Conversation, message_id: str | None
+) -> None:
+    if message_id is not None:
+        message = (
+            await db.scalars(
+                select(Message)
+                .options(
+                    selectinload(Message.attachments),
+                    selectinload(Message.reads),
+                    selectinload(Message.reactions),
+                    selectinload(Message.reply_to),
+                )
+                .where(Message.id == message_id)
+            )
+        ).first()
+        if (
+            message is None
+            or message.conversation_id != conversation.id
+            or message.deleted_at is not None
+        ):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot pin this message")
+    conversation.pinned_message_id = message_id
+    await db.commit()

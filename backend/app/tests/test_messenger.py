@@ -1779,3 +1779,219 @@ async def test_edit_message_rejects_whitespace_and_strips_text(client: AsyncClie
     )
     assert edited.status_code == 200, edited.text
     assert edited.json()["text"] == "padded edit"
+
+
+async def test_create_group_and_admin_permissions(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    carol = await register(client, "carol", "carol@example.com")
+
+    created = await client.post(
+        "/conversations/group",
+        json={
+            "title": "The Boys",
+            "participant_ids": [bob["user"]["id"], carol["user"]["id"]],
+        },
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["kind"] == "group"
+    assert body["title"] == "The Boys"
+    assert body["is_admin"] is True
+    assert alice["user"]["id"] in body["admin_ids"]
+    conversation_id = body["id"]
+
+    forbidden = await client.patch(
+        f"/conversations/{conversation_id}",
+        json={"title": "Renamed by Bob"},
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert forbidden.status_code == 403
+
+    renamed = await client.patch(
+        f"/conversations/{conversation_id}",
+        json={"title": "Renamed"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Renamed"
+
+    left = await client.post(
+        f"/conversations/{conversation_id}/leave",
+        headers=auth_headers(carol["access_token"]),
+    )
+    assert left.status_code == 204
+
+
+async def test_reply_to_message_flow(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+
+    first = await client.post(
+        "/messages",
+        json={"client_message_id": "r1", "conversation_id": conversation_id, "text": "root"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    root_id = first.json()["id"]
+
+    reply = await client.post(
+        "/messages",
+        json={
+            "client_message_id": "r2",
+            "conversation_id": conversation_id,
+            "text": "replying",
+            "reply_to_id": root_id,
+        },
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert reply.status_code == 201, reply.text
+    assert reply.json()["reply_to"]["id"] == root_id
+    assert reply.json()["reply_to"]["text"] == "root"
+    assert reply.json()["reply_to"]["sender_id"] == alice["user"]["id"]
+
+    bad = await client.post(
+        "/messages",
+        json={
+            "client_message_id": "r3",
+            "conversation_id": conversation_id,
+            "text": "bad reply",
+            "reply_to_id": "nonexistent",
+        },
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert bad.status_code == 400
+
+
+async def test_react_toggle_flow(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+    message = await client.post(
+        "/messages",
+        json={"client_message_id": "e1", "conversation_id": conversation_id, "text": "react to me"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    message_id = message.json()["id"]
+
+    reacted = await client.put(
+        f"/messages/{message_id}/react",
+        json={"emoji": "\U0001F525"},
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert reacted.status_code == 200
+    assert reacted.json()["reactions"] == [{"emoji": "\U0001F525", "user_ids": [bob["user"]["id"]]}]
+
+    cleared = await client.put(
+        f"/messages/{message_id}/react",
+        json={"emoji": None},
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["reactions"] == []
+
+
+async def test_pin_message_roundtrip(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+    message = await client.post(
+        "/messages",
+        json={"client_message_id": "p1", "conversation_id": conversation_id, "text": "pin me"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    message_id = message.json()["id"]
+
+    pinned = await client.put(
+        f"/conversations/{conversation_id}/pin/{message_id}",
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert pinned.status_code == 200
+    assert pinned.json()["pinned_message_id"] == message_id
+
+    unpinned = await client.delete(
+        f"/conversations/{conversation_id}/pin",
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert unpinned.status_code == 200
+    assert unpinned.json()["pinned_message_id"] is None
+
+
+async def test_search_messages_endpoint(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    conversation = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = conversation.json()["id"]
+    for index, text in enumerate(["hello unique zebra", "nothing special"]):
+        await client.post(
+            "/messages",
+            json={
+                "client_message_id": f"s{index}",
+                "conversation_id": conversation_id,
+                "text": text,
+            },
+            headers=auth_headers(alice["access_token"]),
+        )
+
+    found = await client.get(
+        "/search/messages?q=zebra", headers=auth_headers(bob["access_token"])
+    )
+    assert found.status_code == 200
+    results = found.json()
+    assert len(results) == 1
+    assert results[0]["conversation_id"] == conversation_id
+    assert results[0]["message"]["text"] == "hello unique zebra"
+
+    miss = await client.get(
+        "/search/messages?q=unicorn", headers=auth_headers(bob["access_token"])
+    )
+    assert miss.status_code == 200
+    assert miss.json() == []
+
+
+async def test_sessions_list_and_revoke(client: AsyncClient) -> None:
+    from app.core.security import decode_jwt_token
+
+    tokens = await register(client, "alice", "alice@example.com")
+    refresh_payload = decode_jwt_token(tokens["refresh_token"], "refresh")
+
+    sessions = await client.get("/auth/sessions", headers=auth_headers(tokens["access_token"]))
+    assert sessions.status_code == 200
+    rows = sessions.json()
+    assert len(rows) == 1
+    assert rows[0]["jti"] == refresh_payload["jti"]
+
+    marked_current = await client.get(
+        f"/auth/sessions?current_jti={refresh_payload['jti']}",
+        headers=auth_headers(tokens["access_token"]),
+    )
+    assert marked_current.json()[0]["current"] is True
+
+    revoked = await client.delete(
+        f"/auth/sessions/{refresh_payload['jti']}",
+        headers=auth_headers(tokens["access_token"]),
+    )
+    assert revoked.status_code == 204
+
+    after = await client.get("/auth/sessions", headers=auth_headers(tokens["access_token"]))
+    assert after.json() == []

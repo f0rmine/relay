@@ -1,18 +1,36 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Query
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.redis import get_redis
-from app.schemas.conversation import ConversationCreate, ConversationDetail, ConversationOut
+from app.models.conversation import Conversation, ConversationParticipant
+from app.schemas.conversation import (
+    ConversationCreate,
+    ConversationDetail,
+    ConversationOut,
+    GroupCreate,
+    GroupUpdate,
+    ParticipantIdsRequest,
+)
 from app.schemas.message import MessageHistory
 from app.schemas.user import UserSearchResult
 from app.services.conversations import (
+    add_group_participants,
+    create_group_conversation,
     get_or_create_private_conversation,
     latest_messages,
+    leave_conversation,
     list_conversations,
     mark_conversation_read,
+    remove_group_participant,
+    rename_group,
+    require_group_admin,
     require_participant,
+    set_pinned_message,
     unread_counts,
 )
 from app.services.messages import decode_message_cursor, encode_message_cursor, list_messages
@@ -40,12 +58,24 @@ async def serialize_conversations(
     unread_by_conversation = await unread_counts(db, conversation_ids, current_user_id)
     serialized: list[ConversationOut] = []
     for conversation in conversations:
+        if sa_inspect(conversation).expired:
+            await db.refresh(conversation)
         participants = [participant.user for participant in conversation.participants]
         latest = latest_by_conversation.get(conversation.id)
         serialized.append(
             ConversationOut(
                 id=conversation.id,
                 kind=conversation.kind,
+                title=conversation.title if conversation.kind == "group" else None,
+                is_admin=any(
+                    participant.user_id == current_user_id and participant.is_admin
+                    for participant in conversation.participants
+                ),
+                admin_ids=[
+                    participant.user_id
+                    for participant in conversation.participants
+                    if participant.is_admin
+                ],
                 participants=[
                     UserSearchResult(
                         id=user.id,
@@ -58,6 +88,7 @@ async def serialize_conversations(
                     for user in participants
                 ],
                 latest_message=serialize_message(latest) if latest else None,
+                pinned_message_id=conversation.pinned_message_id,
                 unread_count=unread_by_conversation[conversation.id],
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
@@ -83,6 +114,145 @@ async def create_conversation(
     conversation = await get_or_create_private_conversation(db, current_user.id, payload.participant_id)
     serialized = await serialize_conversation(db, conversation, current_user.id)
     return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.post("/group", response_model=ConversationDetail, status_code=201)
+async def create_group(
+    payload: GroupCreate, current_user: CurrentUser, db: DbSession
+) -> ConversationDetail:
+    conversation = await create_group_conversation(
+        db, current_user.id, payload.title, payload.participant_ids
+    )
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:new",
+        {"conversation_id": conversation.id},
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.patch("/{conversation_id}", response_model=ConversationDetail)
+async def update_group(
+    conversation_id: str,
+    payload: GroupUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ConversationDetail:
+    conversation = await require_group_admin(db, conversation_id, current_user.id)
+    conversation = await rename_group(db, conversation, payload.title)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.post("/{conversation_id}/participants", response_model=ConversationDetail)
+async def add_participants(
+    conversation_id: str,
+    payload: ParticipantIdsRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ConversationDetail:
+    conversation = await require_group_admin(db, conversation_id, current_user.id)
+    added = await add_group_participants(db, conversation, payload.participant_ids)
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    if added:
+        redis = await get_redis()
+        await manager.broadcast_to_users(
+            redis,
+            await conversation_participant_ids(conversation),
+            "conversation:updated-info",
+            serialize_conversation_dict(serialized),
+        )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.delete("/{conversation_id}/participants/{user_id}", response_model=ConversationDetail)
+async def remove_participant(
+    conversation_id: str,
+    user_id: str,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ConversationDetail:
+    conversation = await require_group_admin(db, conversation_id, current_user.id)
+    await remove_group_participant(db, conversation, user_id)
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.post("/{conversation_id}/leave", status_code=204)
+async def leave_group(conversation_id: str, current_user: CurrentUser, db: DbSession) -> None:
+    result = await leave_conversation(db, conversation_id, current_user.id)
+    if result == "deleted":
+        return
+    conversation = (
+        await db.scalars(
+            select(Conversation)
+            .options(
+                selectinload(Conversation.participants).selectinload(ConversationParticipant.user)
+            )
+            .where(Conversation.id == conversation_id)
+        )
+    ).first()
+    if conversation is None:
+        return
+    viewer_id = next(iter(conversation.participants)).user_id
+    serialized = await serialize_conversation(db, conversation, viewer_id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+
+
+@router.put("/{conversation_id}/pin/{message_id}", response_model=ConversationDetail)
+async def pin_message(
+    conversation_id: str, message_id: str, current_user: CurrentUser, db: DbSession
+) -> ConversationDetail:
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    await set_pinned_message(db, conversation, message_id)
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.delete("/{conversation_id}/pin", response_model=ConversationDetail)
+async def unpin_message(conversation_id: str, current_user: CurrentUser, db: DbSession) -> ConversationDetail:
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    await set_pinned_message(db, conversation, None)
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+def serialize_conversation_dict(out: ConversationOut) -> dict:
+    return out.model_dump()
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)

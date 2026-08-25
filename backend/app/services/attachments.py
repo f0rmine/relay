@@ -48,6 +48,32 @@ ALLOWED_EXTENSIONS_BY_MIME_TYPE = {
 }
 
 
+THUMB_MAX_DIMENSION = 320
+
+
+def attachment_thumb_associated_data(attachment_id: str) -> bytes:
+    return f"relay:attachment:{attachment_id}:thumb:v1".encode()
+
+
+def generate_thumbnail(data: bytes, mime_type: str) -> tuple[bytes, int, int] | None:
+    if not is_image(mime_type) or mime_type == "image/gif":
+        return None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(data)) as image:
+            image = image.convert("RGB") if image.mode not in ("RGB", "L") else image
+            image.thumbnail((THUMB_MAX_DIMENSION, THUMB_MAX_DIMENSION))
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=80)
+            thumb_bytes = buffer.getvalue()
+            return thumb_bytes, image.width, image.height
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def is_image(mime_type: str) -> bool:
     return mime_type.startswith("image/")
 
@@ -113,6 +139,20 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
     upload_dir = settings.upload_dir / "attachments"
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / stored_filename
+    thumb_info = generate_thumbnail(data, content_type)
+    thumb_path: Path | None = None
+    if thumb_info is not None:
+        thumb_bytes, thumb_w, thumb_h = thumb_info
+        encrypted_thumb = get_encryption_keyring().encrypt(
+            thumb_bytes,
+            associated_data=attachment_thumb_associated_data(attachment_id),
+        )
+        stored_thumb = f"{uuid4()}.enc"
+        thumb_path = upload_dir / stored_thumb
+    else:
+        encrypted_thumb = None
+        thumb_w = thumb_h = None
+
     attachment = Attachment(
         id=attachment_id,
         uploader_id=user.id,
@@ -127,22 +167,38 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
         encryption_key_id=encrypted_data.key_id,
         encryption_version=encrypted_data.version,
     )
+    if thumb_path is not None and encrypted_thumb is not None and thumb_w and thumb_h:
+        attachment.thumb_path = str(thumb_path)
+        attachment.thumb_size = len(thumb_bytes)
+        attachment.thumb_w = thumb_w
+        attachment.thumb_h = thumb_h
     try:
         async with aiofiles.open(path, "wb") as out:
             await out.write(encrypted_data.ciphertext)
+        if thumb_path is not None and encrypted_thumb is not None:
+            async with aiofiles.open(thumb_path, "wb") as out:
+                await out.write(encrypted_thumb.ciphertext)
         db.add(attachment)
         await db.commit()
     except Exception:
         await db.rollback()
         with suppress(FileNotFoundError):
             path.unlink()
+        if thumb_path is not None:
+            with suppress(FileNotFoundError):
+                thumb_path.unlink()
         raise
     await db.refresh(attachment)
     return attachment
 
 
-async def read_attachment_bytes(attachment: Attachment) -> bytes:
-    path = Path(attachment.encrypted_path or attachment.storage_path)
+async def read_attachment_bytes(
+    attachment: Attachment, variant: str = "full"
+) -> bytes:
+    use_thumb = variant == "thumb" and attachment.thumb_path is not None
+    path = Path(
+        attachment.thumb_path if use_thumb else (attachment.encrypted_path or attachment.storage_path)
+    )
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
     async with aiofiles.open(path, "rb") as stored_file:
@@ -152,6 +208,11 @@ async def read_attachment_bytes(attachment: Attachment) -> bytes:
         attachment.encryption_key_id,
         attachment.encryption_version,
         attachment.encrypted_path,
+    )
+    aad = (
+        attachment_thumb_associated_data(attachment.id)
+        if use_thumb
+        else attachment_associated_data(attachment.id)
     )
     if all(value is None for value in encryption_metadata):
         return stored_data
@@ -163,7 +224,7 @@ async def read_attachment_bytes(attachment: Attachment) -> bytes:
         stored_data,
         attachment.encryption_nonce,
         attachment.encryption_key_id,
-        associated_data=attachment_associated_data(attachment.id),
+        associated_data=aad,
     )
 
 

@@ -126,6 +126,21 @@ class Settings(BaseSettings):
                 not self.firebase_project_id or not self.firebase_service_account_file
             ):
                 raise ValueError("Enabled production push notifications require Firebase settings")
+
+            _known_dummy_keys = {
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            }
+            weak_keys = [
+                key_id
+                for key_id, encoded_key in self.encryption_keys.items()
+                if encoded_key in _known_dummy_keys
+            ]
+            if weak_keys:
+                raise ValueError(
+                    "Production encryption keys must not use known example values "
+                    f"(key ids: {', '.join(weak_keys)})"
+                )
         return self
 
     @property
