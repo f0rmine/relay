@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from contextlib import suppress
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -93,29 +94,36 @@ class ConnectionManager:
             logger.exception("Redis realtime fanout failed")
 
     async def redis_subscriber(self, redis: Redis) -> None:
-        pubsub = redis.pubsub()
-        try:
-            await pubsub.subscribe("pubsub:broadcast")
-            async for message in pubsub.listen():
-                if message.get("type") != "message":
-                    continue
-                try:
-                    data = json.loads(message["data"])
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if not isinstance(data, dict):
-                    continue
-                if data.get("origin") == self.instance_id:
-                    continue
-                event = data.get("event")
-                user_ids = data.get("user_ids")
-                if not isinstance(event, dict) or not isinstance(user_ids, list):
-                    continue
-                for user_id in user_ids:
-                    if isinstance(user_id, str):
-                        await self.send_to_user(user_id, event)
-        finally:
-            await pubsub.aclose()
+        while True:
+            pubsub = redis.pubsub()
+            try:
+                await pubsub.subscribe("pubsub:broadcast")
+                async for message in pubsub.listen():
+                    if message.get("type") != "message":
+                        continue
+                    try:
+                        data = json.loads(message["data"])
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if not isinstance(data, dict):
+                        continue
+                    if data.get("origin") == self.instance_id:
+                        continue
+                    event = data.get("event")
+                    user_ids = data.get("user_ids")
+                    if not isinstance(event, dict) or not isinstance(user_ids, list):
+                        continue
+                    for user_id in user_ids:
+                        if isinstance(user_id, str):
+                            await self.send_to_user(user_id, event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Redis Pub/Sub subscriber lost connection; retrying in 1s")
+                await asyncio.sleep(1)
+            finally:
+                with suppress(Exception):
+                    await pubsub.aclose()
 
 
 manager = ConnectionManager()

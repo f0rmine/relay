@@ -147,6 +147,7 @@ async def create_message_idempotent(
         select(Message)
         .where(
             Message.sender_id == user.id,
+            Message.conversation_id == conversation_id,
             Message.client_message_id == client_message_id,
         )
         .options(selectinload(Message.attachments), selectinload(Message.reads))

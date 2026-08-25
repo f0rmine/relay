@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import AccessTokenPayload, CurrentUser, DbSession
 from app.core.config import get_settings
 from app.core.rate_limit import auth_rate_limit
 from app.schemas.auth import (
@@ -50,7 +50,13 @@ async def refresh(payload: RefreshRequest, db: DbSession) -> TokenResponse:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(payload: LogoutRequest, current_user: CurrentUser, db: DbSession) -> Response:
+async def logout(
+    payload: LogoutRequest,
+    current_user: CurrentUser,
+    token_payload: AccessTokenPayload,
+    db: DbSession,
+) -> Response:
+    await auth_service.revoke_access_jti(token_payload["jti"])
     await auth_service.revoke_refresh_token(db, current_user.id, payload.refresh_token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.redis import get_redis
 from app.core.security import (
     create_jwt_token,
     hash_password,
@@ -16,6 +17,28 @@ from app.core.security import (
 )
 from app.models.auth import PasswordResetToken, RefreshToken
 from app.models.user import User
+
+_dummy_password_hash: str | None = None
+
+
+def _equalize_missing_account_timing() -> None:
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = hash_password("relay-timing-equalizer")
+    verify_password("relay-timing-equalizer", _dummy_password_hash)
+
+
+async def revoke_access_jti(jti: str) -> None:
+    redis = await get_redis()
+    ttl = max(60, get_settings().access_token_expire_minutes * 60)
+    await redis.set(f"revoked:jti:{jti}", "1", ex=ttl)
+
+
+async def revoke_all_access_tokens(user_id: str) -> None:
+    redis = await get_redis()
+    ttl = max(60, get_settings().access_token_expire_minutes * 60)
+    now = int(datetime.now(UTC).timestamp())
+    await redis.set(f"auth:min_iat:{user_id}", str(now), ex=ttl)
 
 
 async def register_user(
@@ -60,7 +83,10 @@ async def authenticate_user(db: AsyncSession, login: str, password: str) -> User
     user = (
         await db.scalars(select(User).where(or_(User.username == login, User.email == login)))
     ).first()
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None:
+        _equalize_missing_account_timing()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
+    if not verify_password(password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     return user
 
@@ -119,6 +145,28 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> tuple[Us
     elif not verify_token_hash(refresh_token, token_row.token_hash):
         token_row = None
     if token_row is None:
+        reused_row = (
+            await db.scalars(
+                select(RefreshToken)
+                .where(RefreshToken.user_id == user.id, RefreshToken.jti == payload["jti"])
+                .with_for_update()
+            )
+        ).first()
+        if reused_row is not None and verify_token_hash(refresh_token, reused_row.token_hash):
+            active_rows = (
+                await db.scalars(
+                    select(RefreshToken)
+                    .where(
+                        RefreshToken.user_id == user.id,
+                        RefreshToken.revoked_at.is_(None),
+                        RefreshToken.expires_at > now,
+                    )
+                    .with_for_update()
+                )
+            ).all()
+            for row in active_rows:
+                row.revoked_at = now
+            await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
     token_row.revoked_at = now
     access, new_refresh = _add_token_pair(db, user)
@@ -159,6 +207,7 @@ async def revoke_refresh_token(db: AsyncSession, user_id: str, refresh_token: st
 async def create_password_reset_token(db: AsyncSession, email: str) -> str | None:
     user = (await db.scalars(select(User).where(User.email == email.lower()))).first()
     if user is None:
+        _equalize_missing_account_timing()
         return None
     token_jti = str(uuid4())
     token = create_jwt_token(
@@ -230,3 +279,4 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     for refresh_token in refresh_tokens:
         refresh_token.revoked_at = now
     await db.commit()
+    await revoke_all_access_tokens(user.id)

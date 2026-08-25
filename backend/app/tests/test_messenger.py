@@ -91,7 +91,7 @@ async def test_refresh_token_rotation_rejects_reuse(client: AsyncClient) -> None
         "/auth/refresh",
         json={"refresh_token": refreshed.json()["refresh_token"]},
     )
-    assert second_refresh.status_code == 200
+    assert second_refresh.status_code == 401
 
 
 async def test_refresh_token_uses_jti_and_supports_legacy_rows(client: AsyncClient) -> None:
@@ -775,7 +775,11 @@ async def test_failed_attachment_commit_removes_written_file(monkeypatch, tmp_pa
     monkeypatch.setattr(
         attachment_service,
         "get_settings",
-        lambda: SimpleNamespace(upload_dir=tmp_path, max_upload_size_bytes=1024),
+        lambda: SimpleNamespace(
+            upload_dir=tmp_path,
+            max_upload_size_bytes=1024,
+            upload_daily_size_limit_mb=1024,
+        ),
     )
     upload = UploadFile(
         filename="note.txt",
@@ -930,8 +934,8 @@ async def test_push_preview_and_disabled_delivery(client: AsyncClient, monkeypat
     async for db in override():
         sender = await db.get(User, alice["user"]["id"])
         message = await create_message(db, sender, conversation_id, "push text", [])
-        assert push_preview(message) == "push text"
-        assert push_preview(message, "uk") == "push text"
+        assert push_preview(message) == "Message"
+        assert push_preview(message, "uk") == "Повідомлення"
         image_message = SimpleNamespace(
             deleted_at=None,
             text_ciphertext=None,
@@ -1220,8 +1224,11 @@ async def test_websocket_message_send_broadcasts_and_persists(client: AsyncClien
         push_calls.append((recipient_ids, sender_id, message_id))
 
     monkeypatch.setattr(websocket_routes.manager, "broadcast_to_users", fake_broadcast)
-    monkeypatch.setattr(websocket_routes.manager, "is_connected", lambda user_id: False)
-    monkeypatch.setattr(websocket_routes.manager, "is_in_room", lambda conversation_id, user_id: False)
+
+    async def fake_is_online(redis, user_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(websocket_routes, "is_online", fake_is_online)
     monkeypatch.setattr(websocket_routes, "schedule_message_push", fake_schedule_push)
 
     override = app.dependency_overrides[get_db]

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from contextlib import suppress
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -27,7 +26,7 @@ from app.schemas.ws import (
 )
 from app.services.conversations import latest_message, mark_conversation_read, require_participant
 from app.services.messages import create_message_idempotent, delete_message_for_everyone, edit_message
-from app.services.presence import clear_typing, set_offline, set_online, set_typing
+from app.services.presence import clear_typing, is_online, set_offline, set_online, set_typing
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
 from app.websocket.manager import manager
@@ -69,12 +68,14 @@ async def authenticate_websocket(db: AsyncSession, websocket: WebSocket) -> User
 
 
 async def refresh_presence(redis, user_id: str, instance_id: str) -> None:
-    try:
-        while True:
-            await asyncio.sleep(PRESENCE_HEARTBEAT_SECONDS)
+    while True:
+        await asyncio.sleep(PRESENCE_HEARTBEAT_SECONDS)
+        try:
             await set_online(redis, user_id, instance_id)
-    except asyncio.CancelledError:
-        raise
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Presence heartbeat failed; will retry")
 
 
 @router.websocket("/ws")
@@ -132,8 +133,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         finally:
             if presence_task is not None:
                 presence_task.cancel()
-                with suppress(asyncio.CancelledError):
+                try:
                     await presence_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Presence heartbeat ended with an error")
             if registered:
                 await manager.disconnect(user.id, websocket)
             if registered and not manager.is_connected(user.id):
@@ -220,9 +225,7 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         push_recipient_ids = [
             participant_id
             for participant_id in participants
-            if participant_id != user.id
-            and not manager.is_connected(participant_id)
-            and not manager.is_in_room(payload.conversation_id, participant_id)
+            if participant_id != user.id and not await is_online(redis, participant_id)
         ]
         schedule_message_push(push_recipient_ids, user.id, message.id)
         return
