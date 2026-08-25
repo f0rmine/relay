@@ -43,6 +43,7 @@ const scroller = ref<HTMLElement | null>(null);
 const preservingOlderScroll = ref(false);
 const { t } = useI18n();
 let previousScrollHeight = 0;
+let latchTimer: number | null = null;
 
 function senderName(senderId: string) {
   if (senderId === props.currentUserId) return t('common.you');
@@ -61,27 +62,39 @@ function onScroll() {
   }
   preservingOlderScroll.value = true;
   previousScrollHeight = scroller.value.scrollHeight;
-  emit('older');
-  window.setTimeout(() => {
+  latchTimer = window.setTimeout(() => {
     preservingOlderScroll.value = false;
-  }, 1500);
+  }, 5000);
+  emit('older');
 }
 
 watch(
   () => props.messages.length,
-  () => {
+  (length, previousLength) => {
     if (preservingOlderScroll.value) {
+      if (length === previousLength) return;
       nextTick(() => {
-        if (scroller.value) {
+        if (scroller.value && length > (previousLength ?? 0)) {
           scroller.value.scrollTop = scroller.value.scrollHeight - previousScrollHeight;
         }
         preservingOlderScroll.value = false;
+        if (latchTimer !== null) {
+          window.clearTimeout(latchTimer);
+          latchTimer = null;
+        }
       });
       return;
     }
-    scrollBottom();
+    nearBottomScroll();
   }
 );
+
+function nearBottomScroll() {
+  const el = scroller.value;
+  if (!el) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  if (nearBottom) scrollBottom();
+}
 onMounted(scrollBottom);
 </script>
 

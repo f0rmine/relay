@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watchEffect } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem, IonList, IonPage, IonTitle, IonToolbar } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
@@ -54,7 +54,7 @@ const error = ref('');
 const allowedAvatarTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const { t } = useI18n();
 
-watchEffect(() => {
+onMounted(() => {
   displayName.value = auth.user?.display_name || '';
   email.value = auth.user?.email || '';
 });
@@ -63,10 +63,13 @@ async function save() {
   saving.value = true;
   error.value = '';
   try {
-    await auth.setUser(await apiFetch<User>('/users/me/profile', {
+    const updated = await apiFetch<User>('/users/me/profile', {
       method: 'PATCH',
       body: JSON.stringify({ display_name: displayName.value, email: email.value })
-    }));
+    });
+    await auth.setUser(updated);
+    displayName.value = updated.display_name || '';
+    email.value = updated.email || '';
   } catch (err: unknown) {
     error.value = displayError(err, t('profile.updateFailed'));
   } finally {

@@ -22,6 +22,7 @@
           autocomplete="off"
           autocapitalize="sentences"
           spellcheck="false"
+          @keydown.enter.exact.prevent="submit"
           enterkeyhint="send"
           @input="resizeInput"
           @focus="onFocus"

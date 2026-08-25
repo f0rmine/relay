@@ -31,6 +31,7 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryAt = 0;
 let lifecycleEpoch = 0;
 const TYPING_EXPIRY_MS = 7000;
+const MAX_MESSAGES_PER_CONVERSATION = 600;
 
 function nextBackoff(attemptCount: number) {
   const base = Math.min(1000 * 2 ** Math.max(0, attemptCount - 1), 30000);
@@ -210,7 +211,11 @@ export const useMessagesStore = defineStore('messages', {
         nextAttemptAt: 0,
         lastError: null
       };
-      await saveOutboxEntry(entry);
+      try {
+        await saveOutboxEntry(entry);
+      } catch {
+        // Degrade to memory-only queue when persistence is unavailable.
+      }
       this.outbox[id] = entry;
       this.putLocalMessage(entry);
       void this.flushOutbox();
@@ -395,6 +400,9 @@ export const useMessagesStore = defineStore('messages', {
       if (index >= 0) list[index] = { ...message, delivery_state: undefined };
       else list.push({ ...message, delivery_state: undefined });
       this.sortMessages(list);
+      if (list.length > MAX_MESSAGES_PER_CONVERSATION) {
+        list.splice(0, list.length - MAX_MESSAGES_PER_CONVERSATION);
+      }
       this.byConversation[message.conversation_id] = list;
       this.persistConversation(message.conversation_id);
     },

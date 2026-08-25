@@ -79,3 +79,20 @@ async def set_typing(redis: Redis, conversation_id: str, user_id: str) -> None:
 
 async def clear_typing(redis: Redis, conversation_id: str, user_id: str) -> None:
     await redis.delete(typing_key(conversation_id, user_id))
+
+
+async def sweep_expired_presence(redis: Redis) -> list[str]:
+    expired: list[str] = []
+    cursor: int | str = 0
+    while True:
+        cursor, keys = await redis.scan(cursor=cursor, match="presence:user:*", count=100)
+        for key in keys:
+            user_id = str(key).rsplit(":", 1)[-1]
+            if await is_online(redis, user_id):
+                continue
+            marker = f"presence:announced:{user_id}"
+            if await redis.set(marker, "1", nx=True, ex=PRESENCE_TTL_SECONDS * 4):
+                expired.append(user_id)
+        if int(cursor) == 0:
+            break
+    return expired

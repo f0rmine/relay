@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.routes import attachments, auth, conversations, devices, messages, users
@@ -15,8 +14,12 @@ from app.core.encryption import get_encryption_keyring
 from app.core.errors import install_exception_handlers
 from app.core.observability import REQUEST_ID_HEADER, install_observability, metrics_response
 from app.core.redis import close_redis, get_redis, ping_redis
-from app.services.push import drain_push_tasks
+from app.models.user import User
+from app.services.attachments import cleanup_orphan_attachments
+from app.services.presence import sweep_expired_presence
+from app.services.push import drain_push_tasks, push_queue_worker
 from app.websocket.manager import manager
+from app.websocket.routes import participant_ids_for_user
 from app.websocket.routes import router as websocket_router
 
 logger = logging.getLogger(__name__)
@@ -42,15 +45,76 @@ async def lifespan(app: FastAPI):
     subscriber = asyncio.create_task(manager.redis_subscriber(redis))
     subscriber.add_done_callback(log_subscriber_failure)
     app.state.redis_subscriber_task = subscriber
+    push_worker = asyncio.create_task(push_queue_worker())
+    app.state.push_worker_task = push_worker
+    sweeper = asyncio.create_task(presence_sweeper(redis))
+    app.state.presence_sweeper_task = sweeper
+    gc_task = asyncio.create_task(orphan_attachment_gc())
+    app.state.attachment_gc_task = gc_task
     try:
         yield
     finally:
         subscriber.cancel()
         with suppress(asyncio.CancelledError):
             await subscriber
+        push_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await push_worker
+        sweeper.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper
+        gc_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await gc_task
         await drain_push_tasks()
         app.state.redis_subscriber_task = None
         await close_redis()
+
+
+async def presence_sweeper(redis) -> None:
+    from datetime import UTC, datetime
+
+    while True:
+        await asyncio.sleep(30)
+        try:
+            expired = await sweep_expired_presence(redis)
+            if not expired:
+                continue
+            now = datetime.now(UTC)
+            peers: set[str] = set()
+            async with AsyncSessionLocal() as db:
+                for user_id in expired:
+                    user = await db.get(User, user_id)
+                    if user is not None:
+                        user.last_seen_at = now
+                await db.commit()
+                for user_id in expired:
+                    peers.update(await participant_ids_for_user(db, user_id))
+            if peers:
+                for user_id in expired:
+                    await manager.broadcast_to_users(
+                        redis,
+                        list(peers),
+                        "user:offline",
+                        {"user_id": user_id, "last_seen_at": now.isoformat()},
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Presence sweep failed")
+
+
+async def orphan_attachment_gc() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            removed = await cleanup_orphan_attachments()
+            if removed:
+                logger.info("Cleaned up %s orphaned attachments", removed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Orphan attachment cleanup failed")
 
 
 settings = get_settings()
@@ -78,7 +142,23 @@ app.include_router(attachments.router)
 app.include_router(devices.router)
 app.include_router(websocket_router)
 
-app.mount("/uploads/avatars", StaticFiles(directory=settings.upload_dir / "avatars"), name="avatars")
+MAX_JSON_BODY_BYTES = 1_048_576
+BODY_CAP_EXEMPT_PATHS = ("/attachments/upload", "/users/me/avatar")
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    if (
+        request.method in {"POST", "PUT", "PATCH"}
+        and not request.url.path.startswith(BODY_CAP_EXEMPT_PATHS)
+    ):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > MAX_JSON_BODY_BYTES:
+            return JSONResponse(
+                {"detail": "Request body too large"},
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+    return await call_next(request)
 
 
 @app.get("/health")

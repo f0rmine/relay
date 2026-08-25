@@ -15,7 +15,8 @@ class ConnectionManager:
     def __init__(self) -> None:
         self.instance_id = str(uuid4())
         self.user_connections: dict[str, set[WebSocket]] = defaultdict(set)
-        self.rooms: dict[str, set[str]] = defaultdict(set)
+        self.rooms: dict[str, dict[str, int]] = defaultdict(dict)
+        self._ws_rooms: dict[WebSocket, set[str]] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, user_id: str, websocket: WebSocket) -> None:
@@ -33,22 +34,45 @@ class ConnectionManager:
                 connections.discard(websocket)
                 if not connections:
                     self.user_connections.pop(user_id, None)
-            for members in self.rooms.values():
-                members.discard(user_id)
+            for conversation_id in self._ws_rooms.pop(websocket, set()):
+                members = self.rooms.get(conversation_id)
+                if members is None:
+                    continue
+                remaining = members.get(user_id, 0) - 1
+                if remaining > 0:
+                    members[user_id] = remaining
+                else:
+                    members.pop(user_id, None)
+                if not members:
+                    self.rooms.pop(conversation_id, None)
 
-    async def join_room(self, conversation_id: str, user_id: str) -> None:
+    async def join_room(self, conversation_id: str, user_id: str, websocket: WebSocket) -> None:
         async with self._lock:
-            self.rooms[conversation_id].add(user_id)
+            members = self.rooms[conversation_id]
+            members[user_id] = members.get(user_id, 0) + 1
+            self._ws_rooms.setdefault(websocket, set()).add(conversation_id)
 
-    async def leave_room(self, conversation_id: str, user_id: str) -> None:
+    async def leave_room(self, conversation_id: str, user_id: str, websocket: WebSocket) -> None:
         async with self._lock:
-            self.rooms[conversation_id].discard(user_id)
+            joined = self._ws_rooms.get(websocket)
+            if joined is not None:
+                joined.discard(conversation_id)
+            members = self.rooms.get(conversation_id)
+            if members is None:
+                return
+            remaining = members.get(user_id, 0) - 1
+            if remaining > 0:
+                members[user_id] = remaining
+            else:
+                members.pop(user_id, None)
+            if not members:
+                self.rooms.pop(conversation_id, None)
 
     def is_connected(self, user_id: str) -> bool:
         return bool(self.user_connections.get(user_id))
 
     def is_in_room(self, conversation_id: str, user_id: str) -> bool:
-        return user_id in self.rooms.get(conversation_id, set())
+        return bool(self.rooms.get(conversation_id, {}).get(user_id))
 
     async def send_to_user(self, user_id: str, event: dict) -> None:
         connections = list(self.user_connections.get(user_id, set()))

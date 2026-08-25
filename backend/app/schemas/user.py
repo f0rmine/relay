@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.security import sign_avatar_url
 from app.schemas.common import OrmModel
 
 
@@ -15,6 +16,11 @@ class UserPublic(OrmModel):
     last_seen_at: datetime | None = None
     is_online: bool = False
 
+    @field_validator("avatar_url", mode="after")
+    @classmethod
+    def sign_avatar(cls, value: str | None) -> str | None:
+        return sign_avatar_url(value)
+
 
 class UserSearchResult(BaseModel):
     id: str
@@ -23,6 +29,11 @@ class UserSearchResult(BaseModel):
     avatar_url: str | None = None
     last_seen_at: datetime | None = None
     is_online: bool = False
+
+    @field_validator("avatar_url", mode="after")
+    @classmethod
+    def sign_avatar(cls, value: str | None) -> str | None:
+        return sign_avatar_url(value)
 
 
 class ProfileUpdate(BaseModel):

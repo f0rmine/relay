@@ -26,6 +26,7 @@ export interface Message {
   sender_id: string;
   client_message_id?: string | null;
   text?: string | null;
+  undecryptable?: boolean;
   created_at: string;
   updated_at: string;
   edited_at?: string | null;

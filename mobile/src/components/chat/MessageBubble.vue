@@ -13,7 +13,8 @@
         <em>{{ t('chat.deletedBy', { name: senderName }) }}</em>
       </div>
       <template v-else>
-        <p v-if="message.text">{{ message.text }}</p>
+        <p v-if="message.undecryptable" class="undecryptable">{{ t('chat.messageUnavailable') }}</p>
+        <p v-else-if="message.text">{{ message.text }}</p>
         <template v-for="attachment in message.attachments" :key="attachment.id">
           <ImageMessage
             v-if="attachment.mime_type.startsWith('image/')"
@@ -49,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { IonActionSheet } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment, Message } from '@/api/types';
@@ -67,11 +68,17 @@ const lightboxOpen = ref(false);
 const lightboxSrc = ref('');
 const lightboxAlt = ref('');
 
+watch(
+  () => props.message.deleted_at,
+  (deletedAt) => {
+    if (deletedAt) lightboxOpen.value = false;
+  }
+);
+
 const isPending = computed(() => props.message.id.startsWith('pending-'));
 const isFailed = computed(() => props.message.delivery_state === 'failed');
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
-const canEdit = computed(() => props.own && !isPending.value && !props.message.deleted_at && !!props.message.text);
-const actionButtons = computed(() => isFailed.value ? [
+const canEdit = computed(() => props.own && !isPending.value && !props.message.deleted_at && !!props.message.text);const actionButtons = computed(() => isFailed.value ? [
   { text: t('chat.retry'), handler: () => emit('retry') },
   { text: t('chat.removeFailed'), role: 'destructive', handler: () => emit('remove') },
   { text: t('common.cancel'), role: 'cancel' }
@@ -189,6 +196,10 @@ em {
 }
 .edited {
   margin-right: 4px;
+  font-style: italic;
+}
+.undecryptable {
+  color: var(--relay-muted);
   font-style: italic;
 }
 </style>

@@ -29,6 +29,7 @@ const backendErrorKeys: Record<string, string> = {
   'Invalid refresh token': 'api.errors.invalidToken',
   'Invalid reset token': 'api.errors.invalidResetToken',
   'Too many attempts, try again later': 'api.errors.tooManyAttempts',
+  'Too many messages': 'api.errors.tooManyMessages',
   'Username already exists': 'api.errors.usernameExists',
   'Email already exists': 'api.errors.emailExists',
   'Display name is required': 'api.errors.displayNameRequired',
@@ -83,6 +84,7 @@ function notifyTokensRefreshed(tokens: TokenResponse) {
 }
 
 async function notifyAuthExpired() {
+  authEpoch += 1;
   try {
     await Promise.all([clearAuthTokens(), setStoredAuthUser(null)]);
   } finally {
@@ -91,6 +93,11 @@ async function notifyAuthExpired() {
 }
 
 let refreshPromise: Promise<TokenResponse | null> | null = null;
+let authEpoch = 0;
+
+export function markAuthCleared() {
+  authEpoch += 1;
+}
 
 async function storeTokens(tokens: TokenResponse) {
   try {
@@ -110,6 +117,7 @@ async function refreshTokens(): Promise<TokenResponse | null> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) return null;
 
+  const epoch = authEpoch;
   refreshPromise = (async () => {
     const refreshResponse = await safeFetch('/auth/refresh', {
       method: 'POST',
@@ -121,6 +129,7 @@ async function refreshTokens(): Promise<TokenResponse | null> {
       return null;
     }
     const refreshed = (await refreshResponse.json()) as TokenResponse;
+    if (epoch !== authEpoch) return null;
     await storeTokens(refreshed);
     return refreshed;
   })().finally(() => {
@@ -129,6 +138,8 @@ async function refreshTokens(): Promise<TokenResponse | null> {
 
   return refreshPromise;
 }
+
+export { refreshTokens };
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -156,8 +167,9 @@ export function displayError(error: unknown, fallback: string): string {
 
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit & { timeoutMs?: number } = {}
+  options: RequestInit & { timeoutMs?: number; skipAuthRefresh?: boolean } = {}
 ): Promise<T> {
+  const skipAuthRefresh = options.skipAuthRefresh === true;
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
@@ -168,7 +180,7 @@ export async function apiFetch<T>(
   }
 
   let response = await safeFetch(path, { ...options, headers });
-  if (response.status === 401) {
+  if (response.status === 401 && !skipAuthRefresh) {
     const refreshed = await refreshTokens();
     if (refreshed) {
       headers.set('Authorization', `Bearer ${refreshed.access_token}`);
@@ -177,7 +189,7 @@ export async function apiFetch<T>(
   }
 
   if (!response.ok) {
-    if (response.status === 401) await notifyAuthExpired();
+    if (response.status === 401 && !skipAuthRefresh) await notifyAuthExpired();
     const body = await response.json().catch(() => ({}));
     throw new ApiError(response.status, errorMessage(body.detail));
   }

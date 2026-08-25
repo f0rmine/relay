@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia';
-import { ApiError, apiFetch } from '@/api/client';
+import { ApiError, apiFetch, markAuthCleared } from '@/api/client';
 import type { TokenResponse, User } from '@/api/types';
-import { apiUrl } from '@/config/env';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
@@ -103,13 +102,14 @@ export const useAuthStore = defineStore('auth', {
       });
       return restorePromise;
     },
-    async login(login: string, password: string) {
-      this.loading = true;
-      try {
-        const response = await apiFetch<TokenResponse>('/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ login, password })
-        });
+  async login(login: string, password: string) {
+    this.loading = true;
+    try {
+      const response = await apiFetch<TokenResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ login, password }),
+        skipAuthRefresh: true
+      });
         await this.persist(response);
         await useMessagesStore().restoreLocal(response.user.id);
         void useSocketStore().connect();
@@ -123,7 +123,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await apiFetch<TokenResponse>('/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ username, display_name, email, password })
+          body: JSON.stringify({ username, display_name, email, password }),
+          skipAuthRefresh: true
         });
         await this.persist(response);
         await useMessagesStore().restoreLocal(response.user.id);
@@ -131,21 +132,6 @@ export const useAuthStore = defineStore('auth', {
         void initPushNotifications();
       } finally {
         this.loading = false;
-      }
-    },
-    async refresh(): Promise<boolean> {
-      if (!this.refreshToken) return false;
-      try {
-        const response = await fetch(apiUrl('/auth/refresh'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: this.refreshToken })
-        });
-        if (!response.ok) return false;
-        await this.persist(await response.json());
-        return true;
-      } catch {
-        return false;
       }
     },
     async logout() {
@@ -157,11 +143,13 @@ export const useAuthStore = defineStore('auth', {
       } catch {
         // Local logout still succeeds if the backend is unreachable.
       }
+      markAuthCleared();
       await unregisterPushNotifications();
       useSocketStore().disconnect();
       await this.clear();
     },
     async clear(preserveMessageStorage = false) {
+      markAuthCleared();
       const previousUserId = this.user?.id;
       useConversationsStore().reset();
       useMessagesStore().reset();
