@@ -1500,3 +1500,246 @@ async def test_readiness_returns_503_without_dependencies(client: AsyncClient, m
         "status": "not_ready",
         "checks": {"database": False, "redis": False, "subscriber": False},
     }
+
+
+async def test_edit_message_by_sender_succeeds(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "original text", [])
+        message_id = message.id
+        break
+
+    edited = await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "edited text"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["text"] == "edited text"
+    assert edited.json()["edited_at"] is not None
+    assert edited.json()["id"] == message_id
+
+    async for db in override():
+        from app.models.message import Message
+
+        persisted = await db.get(Message, message_id)
+        assert persisted.edited_at is not None
+        assert persisted.text_ciphertext is not None
+        assert b"original text" not in persisted.text_ciphertext
+        assert b"edited text" not in persisted.text_ciphertext
+        break
+
+
+async def test_edit_message_by_non_sender_forbidden(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "alice's message", [])
+        message_id = message.id
+        break
+
+    response = await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "bob's edit"},
+        headers=auth_headers(bob["access_token"]),
+    )
+    assert response.status_code == 403
+
+
+async def test_edit_deleted_message_rejected(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "to be deleted", [])
+        message_id = message.id
+        break
+
+    await client.delete(
+        f"/messages/{message_id}", headers=auth_headers(alice["access_token"])
+    )
+
+    response = await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "too late"},
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert response.status_code == 400
+
+
+async def test_edit_message_broadcasts(client: AsyncClient, monkeypatch) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.api.routes import messages as messages_route
+
+    broadcasts: list[tuple[list[str], str, dict]] = []
+
+    async def fake_broadcast(redis, user_ids: list[str], event_type: str, payload: dict) -> None:
+        broadcasts.append((user_ids, event_type, payload))
+
+    monkeypatch.setattr(messages_route.manager, "broadcast_to_users", fake_broadcast)
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "broadcast me", [])
+        message_id = message.id
+        break
+
+    await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "edited for broadcast"},
+        headers=auth_headers(alice["access_token"]),
+    )
+
+    event_types = [event for _, event, _ in broadcasts]
+    assert "message:edited" in event_types
+    edit_event = next(payload for _, event, payload in broadcasts if event == "message:edited")
+    assert edit_event["id"] == message_id
+    assert edit_event["text"] == "edited for broadcast"
+    assert edit_event["edited_at"] is not None
+
+
+async def test_websocket_edit_message_persists_and_broadcasts(client: AsyncClient, monkeypatch) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.schemas.ws import WebSocketEnvelope
+    from app.services.messages import create_message
+    from app.websocket import routes as websocket_routes
+
+    sent_json: list[dict] = []
+    broadcasts: list[tuple[list[str], str, dict]] = []
+
+    class FakeWebSocket:
+        async def send_json(self, payload: dict) -> None:
+            sent_json.append(payload)
+
+    async def fake_broadcast(redis, user_ids: list[str], event_type: str, payload: dict) -> None:
+        broadcasts.append((user_ids, event_type, payload))
+
+    monkeypatch.setattr(websocket_routes.manager, "broadcast_to_users", fake_broadcast)
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "ws edit me", [])
+        message_id = message.id
+        await websocket_routes.handle_event(
+            db,
+            redis=None,
+            websocket=FakeWebSocket(),
+            user=sender,
+            envelope=WebSocketEnvelope(
+                type="message:edit",
+                payload={"message_id": message_id, "text": "edited via ws"},
+            ),
+        )
+        break
+
+    assert len(broadcasts) >= 1
+    edit_event = next(payload for _, event, payload in broadcasts if event == "message:edited")
+    assert edit_event["id"] == message_id
+    assert edit_event["text"] == "edited via ws"
+    assert edit_event["edited_at"] is not None
+
+
+async def test_edit_message_rejects_whitespace_and_strips_text(client: AsyncClient) -> None:
+    alice = await register(client, "alice", "alice@example.com")
+    bob = await register(client, "bob", "bob@example.com")
+    created = await client.post(
+        "/conversations",
+        json={"participant_id": bob["user"]["id"]},
+        headers=auth_headers(alice["access_token"]),
+    )
+    conversation_id = created.json()["id"]
+
+    from app.core.database import get_db
+    from app.main import app
+    from app.models.user import User
+    from app.services.messages import create_message
+
+    override = app.dependency_overrides[get_db]
+    async for db in override():
+        sender = await db.get(User, alice["user"]["id"])
+        message = await create_message(db, sender, conversation_id, "original text", [])
+        message_id = message.id
+        break
+
+    response = await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "   "},
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert response.status_code == 422
+
+    edited = await client.patch(
+        f"/messages/{message_id}",
+        json={"text": "  padded edit  "},
+        headers=auth_headers(alice["access_token"]),
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["text"] == "padded edit"

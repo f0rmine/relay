@@ -20,12 +20,13 @@ from app.schemas.ws import (
     AuthPayload,
     ConversationIdPayload,
     MessageDeletePayload,
+    MessageEditPayload,
     MessageSendPayload,
     TypingPayload,
     WebSocketEnvelope,
 )
 from app.services.conversations import latest_message, mark_conversation_read, require_participant
-from app.services.messages import create_message_idempotent, delete_message_for_everyone
+from app.services.messages import create_message_idempotent, delete_message_for_everyone, edit_message
 from app.services.presence import clear_typing, set_offline, set_online, set_typing
 from app.services.push import schedule_message_push
 from app.websocket.events import conversation_participant_ids, serialize_message
@@ -232,6 +233,23 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         conversation = await require_participant(db, message.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
         await manager.broadcast_to_users(redis, participants, "message:deleted", serialize_message(message))
+        latest = await latest_message(db, message.conversation_id)
+        if latest is not None:
+            await manager.broadcast_to_users(
+                redis,
+                participants,
+                "conversation:updated",
+                {"conversation_id": message.conversation_id, "latest_message": serialize_message(latest)},
+            )
+        return
+
+    if envelope.type == "message:edit":
+        payload = MessageEditPayload.model_validate(envelope.payload)
+        message = await edit_message(db, payload.message_id, user, payload.text)
+        conversation = await require_participant(db, message.conversation_id, user.id)
+        participants = await conversation_participant_ids(conversation)
+        message_payload = serialize_message(message)
+        await manager.broadcast_to_users(redis, participants, "message:edited", message_payload)
         latest = await latest_message(db, message.conversation_id)
         if latest is not None:
             await manager.broadcast_to_users(

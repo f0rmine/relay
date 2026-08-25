@@ -15,12 +15,17 @@
       <template v-else>
         <p v-if="message.text">{{ message.text }}</p>
         <template v-for="attachment in message.attachments" :key="attachment.id">
-          <ImageMessage v-if="attachment.mime_type.startsWith('image/')" :attachment="attachment" />
+          <ImageMessage
+            v-if="attachment.mime_type.startsWith('image/')"
+            :attachment="attachment"
+            @click="openLightbox($event, attachment)"
+          />
           <FileMessage v-else :attachment="attachment" />
         </template>
       </template>
       <div class="time">
         {{ d(new Date(message.created_at), 'time') }}
+        <span v-if="message.edited_at" class="edited">{{ t('chat.edited') }}</span>
         <span v-if="message.delivery_state === 'queued'">{{ t('chat.queued') }}</span>
         <span v-else-if="message.delivery_state === 'sending'">{{ t('chat.sending') }}</span>
         <span v-else-if="message.delivery_state === 'failed'">{{ t('chat.failed') }}</span>
@@ -34,6 +39,12 @@
       css-class="relay-message-actions"
       @didDismiss="actionsOpen = false"
     />
+    <ImageLightbox
+      :src="lightboxSrc"
+      :alt="lightboxAlt"
+      :open="lightboxOpen"
+      @close="lightboxOpen = false"
+    />
   </div>
 </template>
 
@@ -41,35 +52,42 @@
 import { computed, ref } from 'vue';
 import { IonActionSheet } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
-import type { Message } from '@/api/types';
+import type { Attachment, Message } from '@/api/types';
 import FileMessage from './FileMessage.vue';
 import ImageMessage from './ImageMessage.vue';
+import ImageLightbox from './ImageLightbox.vue';
 
 const props = defineProps<{ message: Message; own: boolean; senderName: string }>();
-const emit = defineEmits<{ delete: []; retry: []; remove: [] }>();
+const emit = defineEmits<{ delete: []; retry: []; remove: []; edit: [message: Message] }>();
 const actionsOpen = ref(false);
 let pressTimer: number | undefined;
 const { d, t } = useI18n();
 
+const lightboxOpen = ref(false);
+const lightboxSrc = ref('');
+const lightboxAlt = ref('');
+
 const isPending = computed(() => props.message.id.startsWith('pending-'));
 const isFailed = computed(() => props.message.delivery_state === 'failed');
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
+const canEdit = computed(() => props.own && !isPending.value && !props.message.deleted_at && !!props.message.text);
 const actionButtons = computed(() => isFailed.value ? [
   { text: t('chat.retry'), handler: () => emit('retry') },
   { text: t('chat.removeFailed'), role: 'destructive', handler: () => emit('remove') },
   { text: t('common.cancel'), role: 'cancel' }
 ] : [
+  ...(canEdit.value ? [{ text: t('chat.editMessage'), handler: () => emit('edit', props.message) }] : []),
   { text: t('chat.deleteEveryone'), role: 'destructive', handler: () => emit('delete') },
   { text: t('common.cancel'), role: 'cancel' }
 ]);
 
 function openActions() {
-  if (!canDelete.value && !isFailed.value) return;
+  if (!canDelete.value && !isFailed.value && !canEdit.value) return;
   actionsOpen.value = true;
 }
 
 function startPress() {
-  if (!canDelete.value && !isFailed.value) return;
+  if (!canDelete.value && !isFailed.value && !canEdit.value) return;
   cancelPress();
   pressTimer = window.setTimeout(openActions, 500);
 }
@@ -77,6 +95,12 @@ function startPress() {
 function cancelPress() {
   if (pressTimer) window.clearTimeout(pressTimer);
   pressTimer = undefined;
+}
+
+function openLightbox(url: string, attachment: Attachment) {
+  lightboxSrc.value = url;
+  lightboxAlt.value = attachment.original_filename;
+  lightboxOpen.value = true;
 }
 </script>
 
@@ -162,5 +186,9 @@ em {
   font-size: 11px;
   color: #b8c8da;
   white-space: nowrap;
+}
+.edited {
+  margin-right: 4px;
+  font-style: italic;
 }
 </style>

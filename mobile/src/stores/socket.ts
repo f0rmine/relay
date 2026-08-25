@@ -244,6 +244,7 @@ export const useSocketStore = defineStore('socket', {
         }
       }
       if (type === 'message:deleted') messages.markDeleted(payload as unknown as Message);
+      if (type === 'message:edited') messages.upsert(payload as unknown as Message);
       if (type === 'message:read') {
         const conversationId = stringField(payload, 'conversation_id');
         const userId = stringField(payload, 'user_id');
