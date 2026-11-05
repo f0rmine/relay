@@ -17,6 +17,9 @@ export interface Attachment {
   mime_type: string;
   file_size: number;
   public_url: string;
+  thumb_w?: number | null;
+  thumb_h?: number | null;
+  thumb_size?: number | null;
   created_at: string;
 }
 

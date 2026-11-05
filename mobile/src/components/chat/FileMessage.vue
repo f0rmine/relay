@@ -53,7 +53,7 @@ async function openFile() {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #b7ddff;
+  color: var(--ion-color-primary);
   font: inherit;
   text-align: left;
 }

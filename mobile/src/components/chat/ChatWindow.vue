@@ -35,14 +35,14 @@
       :images="galleryImages"
       :index="galleryIndex"
       :open="galleryOpen"
-      @close="galleryOpen = false"
+      @close="closeGallery"
       @update:index="galleryIndex = $event"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { IonButton } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import type { Message, User } from '@/api/types';
@@ -98,6 +98,15 @@ const pinnedPreview = computed(() => {
   return target.text || target.attachments?.[0]?.original_filename || t('chat.pinned');
 });
 
+const galleryObjectUrls: string[] = [];
+
+function revokeGalleryUrls() {
+  while (galleryObjectUrls.length) {
+    const url = galleryObjectUrls.pop();
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
 async function openGallery(payload: { messageId: string; attachmentId: string }) {
   const images: Array<{ messageId: string; attachmentId: string }> = [];
   for (const message of props.messages) {
@@ -113,19 +122,51 @@ async function openGallery(payload: { messageId: string; attachmentId: string })
     images.findIndex((entry) => entry.attachmentId === payload.attachmentId)
   );
   galleryIndex.value = startIndex;
+  revokeGalleryUrls();
+  galleryImages.value = images.map((entry) => ({ src: '', alt: entry.attachmentId }));
   galleryOpen.value = true;
-  galleryImages.value = await Promise.all(
+  // Load thumbs first for fast preview, then upgrade the current image to full.
+  const loaded = await Promise.all(
     images.map(async (entry) => {
       try {
         const blob = await import('@/api/client').then((mod) =>
-          mod.apiBlob(`/attachments/${entry.attachmentId}/download`)
+          mod.apiBlob(`/attachments/${entry.attachmentId}/download?variant=thumb`)
         );
-        return { src: URL.createObjectURL(blob), alt: entry.attachmentId };
+        const url = URL.createObjectURL(blob);
+        if (!galleryOpen.value) {
+          URL.revokeObjectURL(url);
+          return { src: '', alt: entry.attachmentId };
+        }
+        galleryObjectUrls.push(url);
+        return { src: url, alt: entry.attachmentId };
       } catch {
         return { src: '', alt: entry.attachmentId };
       }
     })
   );
+  if (galleryOpen.value) galleryImages.value = loaded;
+  // Upgrade the viewed image to full resolution in the background.
+  const current = images[startIndex];
+  if (current && galleryOpen.value) {
+    try {
+      const blob = await import('@/api/client').then((mod) =>
+        mod.apiBlob(`/attachments/${current.attachmentId}/download`)
+      );
+      if (!galleryOpen.value) return;
+      const url = URL.createObjectURL(blob);
+      galleryObjectUrls.push(url);
+      const next = [...galleryImages.value];
+      if (next[startIndex]) next[startIndex] = { src: url, alt: current.attachmentId };
+      galleryImages.value = next;
+    } catch {
+      // Thumb already shown; keep it.
+    }
+  }
+}
+
+function closeGallery() {
+  galleryOpen.value = false;
+  revokeGalleryUrls();
 }
 
 function senderName(senderId: string) {
@@ -196,6 +237,7 @@ function nearBottomScroll() {
   if (nearBottom) scrollBottom();
 }
 onMounted(scrollBottom);
+onUnmounted(revokeGalleryUrls);
 
 let previousScrollHeight = 0;
 </script>
@@ -206,7 +248,7 @@ let previousScrollHeight = 0;
   height: 100%;
   overflow-y: auto;
   padding: 10px 0 12px;
-  background: #0e1621;
+  background: var(--ion-background-color);
 }
 .pin-banner {
   display: flex;
