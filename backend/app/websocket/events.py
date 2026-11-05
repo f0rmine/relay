@@ -3,7 +3,7 @@ from fastapi.encoders import jsonable_encoder
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.attachment import AttachmentOut
-from app.services.messages import DecryptionError, plaintext_message_text
+from app.services.messages import DecryptionError, parse_mentions, plaintext_message_text
 
 
 def _safe_text(message: Message) -> str | None:
@@ -40,6 +40,7 @@ def _reply_to_snapshot(message: Message) -> dict | None:
 
 
 def serialize_message(message: Message) -> dict:
+    link_preview = getattr(message, "_link_preview", None)
     if message.deleted_at is not None:
         return jsonable_encoder(
             {
@@ -58,6 +59,9 @@ def serialize_message(message: Message) -> dict:
                 "read_by": [read.user_id for read in message.reads],
                 "reactions": [],
                 "reply_to": None,
+                "scheduled_at": message.scheduled_at,
+                "mentions": [],
+                "link_preview": None,
             }
         )
     text = _safe_text(message)
@@ -79,6 +83,9 @@ def serialize_message(message: Message) -> dict:
             "read_by": [read.user_id for read in message.reads],
             "reactions": _reactions_aggregate(message),
             "reply_to": _reply_to_snapshot(message),
+            "scheduled_at": message.scheduled_at,
+            "mentions": parse_mentions(message),
+            "link_preview": link_preview,
         }
     )
 

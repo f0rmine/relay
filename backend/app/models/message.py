@@ -50,6 +50,13 @@ class Message(Base):
     reply_to_id: Mapped[str | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
     )
+    scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    scheduled_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    mentions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     conversation = relationship(
         "Conversation", back_populates="messages", foreign_keys=[conversation_id]

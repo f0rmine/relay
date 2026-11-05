@@ -9,6 +9,7 @@ from app.services.messages import (
     create_message_idempotent,
     delete_message_for_everyone,
     edit_message,
+    is_scheduled_pending,
     react_to_message,
 )
 from app.services.presence import is_online
@@ -36,10 +37,14 @@ async def send_message(
         payload.text,
         payload.attachment_ids,
         reply_to_id=payload.reply_to_id,
+        scheduled_at=payload.scheduled_at,
+        mentions=payload.mentions,
     )
     message_payload = serialize_message(message)
     if not created:
         response.status_code = status.HTTP_200_OK
+        return message_payload
+    if is_scheduled_pending(message):
         return message_payload
 
     conversation = await require_participant(db, message.conversation_id, current_user.id)

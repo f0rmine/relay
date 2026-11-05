@@ -59,6 +59,13 @@
         <UserSearchList @toggle="addMember" />
       </div>
 
+      <div class="export-section">
+        <ion-button expand="block" fill="outline" :disabled="exporting" @click="startExport">
+          {{ exporting ? t('chat.exportingChat') : t('chat.exportChat') }}
+        </ion-button>
+        <p v-if="exportStatus" class="muted export-status">{{ exportStatus }}</p>
+      </div>
+
       <ion-button v-if="isMember" expand="block" fill="clear" color="danger" class="leave" @click="leave">
         {{ t('groups.leave') }}
       </ion-button>
@@ -67,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   IonBackButton,
@@ -84,7 +91,7 @@ import {
   IonToolbar
 } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
-import { apiFetch, displayError } from '@/api/client';
+import { apiBlob, apiFetch, displayError } from '@/api/client';
 import type { Conversation, User } from '@/api/types';
 import Avatar from '@/components/users/Avatar.vue';
 import ErrorState from '@/components/ErrorState.vue';
@@ -103,6 +110,16 @@ const saving = ref(false);
 const uploadingAvatar = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const titleDraft = ref('');
+const exporting = ref(false);
+const exportStatus = ref('');
+let exportPollTimer: number | null = null;
+
+function stopExportPoll() {
+  if (exportPollTimer) window.clearInterval(exportPollTimer);
+  exportPollTimer = null;
+}
+
+onUnmounted(stopExportPoll);
 
 const conversation = computed(() => conversations.items.find((item) => item.id === conversationId));
 const isAdmin = computed(() => Boolean(conversation.value?.is_admin));
@@ -206,6 +223,54 @@ async function leave() {
     error.value = displayError(err, t('groups.leaveFailed'));
   }
 }
+
+async function downloadExport(downloadUrl: string | undefined, jobId: string) {
+  const blob = await apiBlob(`/exports/${jobId}/download`);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `chat-export-${conversationId}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+async function startExport() {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportStatus.value = t('chat.exportingChat');
+  error.value = '';
+  try {
+    const created = await apiFetch<{ id: string }>(`/exports`, {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId })
+    });
+    const jobId = created.id;
+    exportPollTimer = window.setInterval(async () => {
+      try {
+        const status = await apiFetch<{ status: string }>(`/exports/${jobId}`);
+        if (status.status === 'done' || status.status === 'completed' || status.status === 'complete') {
+          stopExportPoll();
+          await downloadExport(undefined, jobId);
+          exportStatus.value = t('chat.exportReady');
+          exporting.value = false;
+        } else if (status.status === 'failed' || status.status === 'error') {
+          stopExportPoll();
+          exportStatus.value = t('chat.exportFailed');
+          exporting.value = false;
+        }
+      } catch {
+        stopExportPoll();
+        exportStatus.value = t('chat.exportFailed');
+        exporting.value = false;
+      }
+    }, 2000);
+  } catch (err: unknown) {
+    exportStatus.value = displayError(err, t('chat.exportFailed'));
+    exporting.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -230,5 +295,12 @@ async function leave() {
 .action,
 .leave {
   margin-top: 8px;
+}
+.export-section {
+  margin: 12px 16px 0;
+}
+.export-status {
+  margin: 6px 2px 0;
+  font-size: 13px;
 }
 </style>

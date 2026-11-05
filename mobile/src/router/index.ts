@@ -14,6 +14,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/groups/new', component: () => import('@/views/GroupCreateView.vue'), meta: { auth: true } },
   { path: '/message-search', component: () => import('@/views/MessageSearchView.vue'), meta: { auth: true } },
   { path: '/chat/:id/info', component: () => import('@/views/GroupInfoView.vue'), meta: { auth: true } },
+  { path: '/chat/:id/media', component: () => import('@/views/MediaGalleryView.vue'), meta: { auth: true } },
   { path: '/profile', component: () => import('@/views/ProfileView.vue'), meta: { auth: true } },
   { path: '/:pathMatch(.*)*', redirect: '/conversations' }
 ];

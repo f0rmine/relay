@@ -91,7 +91,9 @@ function localMessage(entry: OutboxEntry): Message {
     attachments: localAttachments(entry),
     read_by: [],
     request_id: entry.id,
-    delivery_state: entry.state
+    delivery_state: entry.state,
+    scheduled_at: entry.scheduled_at ?? null,
+    mentions: entry.mentions ?? []
   };
 }
 
@@ -191,7 +193,9 @@ export const useMessagesStore = defineStore('messages', {
       conversationId: string,
       text: string,
       file: File | null = null,
-      replyToId: string | null = null
+      replyToId: string | null = null,
+      scheduledAt: string | null = null,
+      mentions: string[] = []
     ) {
       const auth = useAuthStore();
       if (!auth.user) throw new Error('Authentication is required');
@@ -211,6 +215,8 @@ export const useMessagesStore = defineStore('messages', {
         } : null,
         uploadedAttachmentIds: [],
         reply_to_id: replyToId,
+        scheduled_at: scheduledAt,
+        mentions: mentions.length ? [...new Set(mentions)] : [],
         createdAt: new Date().toISOString(),
         state: 'queued',
         attemptCount: 0,
@@ -276,7 +282,9 @@ export const useMessagesStore = defineStore('messages', {
             conversation_id: entry.conversationId,
             text: entry.text,
             attachment_ids: entry.uploadedAttachmentIds,
-            ...(entry.reply_to_id ? { reply_to_id: entry.reply_to_id } : {})
+            ...(entry.reply_to_id ? { reply_to_id: entry.reply_to_id } : {}),
+            ...(entry.scheduled_at ? { scheduled_at: entry.scheduled_at } : {}),
+            ...(entry.mentions?.length ? { mentions: entry.mentions } : {})
           })
         });
         if (epoch !== lifecycleEpoch || useAuthStore().user?.id !== userId) return 'stale';

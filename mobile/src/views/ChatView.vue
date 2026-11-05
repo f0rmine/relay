@@ -33,6 +33,7 @@
       :sending="sending"
       :editing-message="editingMessage"
       :reply-message="replyMessage"
+      :participants="conversation?.participants || []"
       :initial-value="draft"
       @send="send"
       @typing="typing"
@@ -150,13 +151,22 @@ onUnmounted(() => {
 async function send(
   text: string,
   file: File | null,
-  complete: (accepted: boolean) => void
+  complete: (accepted: boolean) => void,
+  scheduledAt?: string | null,
+  mentions?: string[]
 ) {
   sending.value = true;
   error.value = '';
   let accepted = false;
   try {
-    await messages.enqueue(conversationId.value, text, file, replyMessage.value?.id || null);
+    await messages.enqueue(
+      conversationId.value,
+      text,
+      file,
+      replyMessage.value?.id || null,
+      scheduledAt ?? null,
+      mentions ?? []
+    );
     accepted = true;
     if (!file) clearDraft(conversationId.value);
   } catch (err: unknown) {

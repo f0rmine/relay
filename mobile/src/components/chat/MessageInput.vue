@@ -14,7 +14,37 @@
         <ion-icon :icon="closeOutline" />
       </ion-button>
     </div>
+    <div v-if="!editingMessage && scheduledIso" class="edit-bar">
+      <ion-icon :icon="timeOutline" class="edit-icon" />
+      <span class="edit-label">{{ t('chat.scheduledFor', { date: scheduledLabel }) }}</span>
+      <ion-button fill="clear" class="cancel-edit" @click="clearSchedule" :aria-label="t('chat.cancelSchedule')">
+        <ion-icon :icon="closeOutline" />
+      </ion-button>
+    </div>
+    <div v-if="!editingMessage && scheduleOpen" class="schedule-panel">
+      <label class="schedule-label">{{ t('chat.scheduleTime') }}</label>
+      <input
+        v-model="scheduledLocal"
+        type="datetime-local"
+        class="schedule-input"
+        :min="scheduleMin"
+        :max="scheduleMax"
+      />
+      <ion-button fill="clear" size="small" @click="clearSchedule">{{ t('chat.cancel') }}</ion-button>
+    </div>
     <AttachmentPreview v-if="!editingMessage" :file="file" @clear="file = null" />
+    <div v-if="!editingMessage && mentionOpen && mentionMatches.length" class="mention-list" data-testid="mention-list">
+      <button
+        v-for="participant in mentionMatches"
+        :key="participant.id"
+        type="button"
+        class="mention-item"
+        @mousedown.prevent="selectMention(participant)"
+      >
+        <span class="mention-name">{{ participant.display_name }}</span>
+        <span class="mention-username">@{{ participant.username }}</span>
+      </button>
+    </div>
     <div class="bar">
       <ion-button v-if="!editingMessage" fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
         <ion-icon :icon="attachOutline" />
@@ -31,11 +61,22 @@
           spellcheck="false"
           @keydown.enter.exact.prevent="submit"
           enterkeyhint="send"
-          @input="resizeInput"
+          @input="onInput"
           @focus="onFocus"
           @blur="onBlur"
         ></textarea>
       </div>
+      <ion-button
+        v-if="!editingMessage"
+        fill="clear"
+        class="attach-button"
+        shape="round"
+        :class="{ active: scheduleOpen || scheduledIso }"
+        @click="toggleSchedule"
+        :aria-label="t('chat.schedule')"
+      >
+        <ion-icon :icon="timeOutline" />
+      </ion-button>
       <ion-button
         v-if="!editingMessage && !canSend && !recording"
         fill="clear"
@@ -55,9 +96,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { IonButton, IonIcon } from '@ionic/vue';
-import { attachOutline, paperPlaneOutline, closeOutline, createOutline, checkmarkOutline, micOutline, stopOutline, returnDownForwardOutline } from 'ionicons/icons';
+import { attachOutline, paperPlaneOutline, closeOutline, createOutline, checkmarkOutline, micOutline, stopOutline, returnDownForwardOutline, timeOutline } from 'ionicons/icons';
 import { useI18n } from 'vue-i18n';
 import AttachmentPreview from './AttachmentPreview.vue';
 
@@ -71,9 +112,10 @@ const props = defineProps<{
   editingMessage?: EditingMessage | null;
   replyMessage?: import('@/api/types').Message | null;
   initialValue?: string;
+  participants?: Array<{ id: string; display_name: string; username: string }>;
 }>();
 const emit = defineEmits<{
-  send: [text: string, file: File | null, complete: (accepted: boolean) => void];
+  send: [text: string, file: File | null, complete: (accepted: boolean) => void, scheduledAt?: string | null, mentions?: string[]];
   typing: [active: boolean];
   edit: [text: string, complete: (accepted: boolean) => void];
   'cancel-edit': [];
@@ -88,6 +130,107 @@ let mediaRecorder: MediaRecorder | null = null;
 let recordedChunks: BlobPart[] = [];
 let recordStream: MediaStream | null = null;
 let recordTimer: number | null = null;
+
+const scheduleOpen = ref(false);
+const scheduledLocal = ref('');
+const mentionQuery = ref('');
+const mentionStart = ref(0);
+const mentionOpen = ref(false);
+const mentionedIds = ref<Set<string>>(new Set());
+
+function toLocalInput(value: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
+const scheduleMin = computed(() => toLocalInput(new Date(Date.now() + 60_000)));
+const scheduleMax = computed(() => toLocalInput(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)));
+
+const scheduledIso = computed<string | null>(() => {
+  if (!scheduledLocal.value) return null;
+  const date = new Date(scheduledLocal.value);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) return null;
+  return date.toISOString();
+});
+
+const { t, d } = useI18n();
+const scheduledLabel = computed(() => (scheduledIso.value ? d(new Date(scheduledIso.value), 'dateTime') : ''));
+
+const mentionMatches = computed(() => {
+  const query = mentionQuery.value.trim().toLowerCase();
+  if (!query || !props.participants?.length) return [];
+  return props.participants
+    .filter(
+      (p) =>
+        p.display_name.toLowerCase().includes(query) ||
+        p.username.toLowerCase().includes(query)
+    )
+    .slice(0, 6);
+});
+
+function toggleSchedule() {
+  scheduleOpen.value = !scheduleOpen.value;
+  if (scheduleOpen.value && !scheduledLocal.value) {
+    const soon = new Date(Date.now() + 60 * 60 * 1000);
+    scheduledLocal.value = toLocalInput(soon);
+  }
+}
+
+function clearSchedule() {
+  scheduledLocal.value = '';
+  scheduleOpen.value = false;
+}
+
+function detectMention() {
+  const input = textInput.value;
+  if (!input || !props.participants?.length) {
+    mentionOpen.value = false;
+    return;
+  }
+  const caret = input.selectionStart ?? text.value.length;
+  const before = text.value.slice(0, caret);
+  const match = /@([^\s@]*)$/.exec(before);
+  if (match && match[1].length >= 1) {
+    mentionQuery.value = match[1];
+    mentionStart.value = caret - match[0].length;
+    mentionOpen.value = true;
+  } else {
+    mentionOpen.value = false;
+  }
+}
+
+function onInput() {
+  resizeInput();
+  detectMention();
+}
+
+async function selectMention(participant: { id: string; display_name: string; username: string }) {
+  const caret = textInput.value?.selectionStart ?? text.value.length;
+  const end = mentionStart.value + 1 + mentionQuery.value.length;
+  const inserted = `@${participant.display_name} `;
+  text.value = text.value.slice(0, mentionStart.value) + inserted + text.value.slice(end);
+  const next = new Set(mentionedIds.value);
+  next.add(participant.id);
+  mentionedIds.value = next;
+  mentionOpen.value = false;
+  resizeInput();
+  await nextTick();
+  const position = mentionStart.value + inserted.length;
+  textInput.value?.focus();
+  try {
+    textInput.value?.setSelectionRange(position, position);
+  } catch {
+    // selection API may be unavailable
+  }
+}
+
+function resolveMentions(): string[] {
+  const resolved = new Set<string>(mentionedIds.value);
+  for (const participant of props.participants || []) {
+    if (text.value.includes(`@${participant.display_name}`)) resolved.add(participant.id);
+  }
+  return [...resolved];
+}
 
 watch(
   () => props.initialValue,
@@ -145,7 +288,6 @@ function finishRecording() {
 const fileInput = ref<HTMLInputElement | null>(null);
 const textInput = ref<HTMLTextAreaElement | null>(null);
 const canSend = computed(() => text.value.trim().length > 0 || file.value);
-const { t } = useI18n();
 
 let typingStopTimer: ReturnType<typeof setTimeout> | null = null;
 const typingActive = ref(false);
@@ -199,6 +341,7 @@ function onFocus() {
     typingActive.value = true;
     emit('typing', true);
   }
+  detectMention();
 }
 
 function onBlur() {
@@ -206,6 +349,7 @@ function onBlur() {
     typingStopTimer = null;
     typingActive.value = false;
     emit('typing', false);
+    mentionOpen.value = false;
   }, 500);
 }
 
@@ -229,13 +373,17 @@ function submit() {
       mediaRecorder?.stop();
       return;
     }
+    const mentions = resolveMentions();
     emit('send', text.value, file.value, (accepted) => {
       if (!accepted) return;
       text.value = '';
       file.value = null;
+      mentionedIds.value = new Set();
+      mentionOpen.value = false;
+      clearSchedule();
       if (fileInput.value) fileInput.value.value = '';
       requestAnimationFrame(resizeInput);
-    });
+    }, scheduledIso.value, mentions);
   }
 }
 </script>
@@ -272,13 +420,64 @@ function submit() {
   --color: var(--relay-muted);
   margin: 0;
 }
+.schedule-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 0;
+}
+.schedule-label {
+  font-size: 13px;
+  color: var(--relay-muted);
+}
+.schedule-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--relay-border);
+  border-radius: 8px;
+  background: var(--relay-input);
+  color: var(--ion-text-color);
+  font-size: 14px;
+}
+.mention-list {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 10px 0;
+  border: 1px solid var(--relay-border);
+  border-radius: 10px;
+  background: var(--relay-panel);
+  overflow: hidden;
+}
+.mention-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--ion-text-color);
+  text-align: left;
+  cursor: pointer;
+}
+.mention-item:active {
+  background: var(--relay-border);
+}
+.mention-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.mention-username {
+  font-size: 12px;
+  color: var(--relay-muted);
+}
 .record-timer {
   font-size: 12px;
   color: #ff8a80;
 }
 .bar {
-  display: grid;
-  grid-template-columns: 36px 1fr 36px;
+  display: flex;
   align-items: center;
   gap: 6px;
   padding: 7px 10px 8px;
@@ -294,12 +493,16 @@ function submit() {
   width: 36px;
   height: 36px;
   margin: 0;
+  flex-shrink: 0;
 }
 .attach-button {
   --background: var(--relay-input);
   --background-activated: rgba(142, 162, 184, 0.16);
   --color: var(--relay-muted);
   --background-hover: rgba(142, 162, 184, 0.12);
+}
+.attach-button.active {
+  --color: var(--ion-color-primary);
 }
 .attach-button ion-icon {
   font-size: 19px;
@@ -322,6 +525,7 @@ function submit() {
 }
 .input-shell {
   display: grid;
+  flex: 1;
   min-height: 36px;
   border: 1px solid var(--relay-border);
   border-radius: 18px;

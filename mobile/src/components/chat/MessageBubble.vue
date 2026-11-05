@@ -25,7 +25,12 @@
       </div>
       <template v-else>
         <p v-if="message.undecryptable" class="undecryptable">{{ t('chat.messageUnavailable') }}</p>
-        <p v-else-if="message.text">{{ message.text }}</p>
+        <p v-else-if="message.text">
+          <template v-for="(segment, index) in textSegments" :key="index">
+            <mark v-if="segment.mention" class="mention">{{ segment.text }}</mark>
+            <template v-else>{{ segment.text }}</template>
+          </template>
+        </p>
         <template v-for="attachment in message.attachments" :key="attachment.id">
           <VoiceNotePlayer
             v-if="attachment.mime_type?.startsWith('audio/') && !attachment.id.startsWith('local-')"
@@ -42,6 +47,7 @@
           />
           <FileMessage v-else :attachment="attachment" />
         </template>
+        <LinkPreviewCard v-if="message.link_preview" :preview="message.link_preview" />
       </template>
       <div v-if="reactionChips.length" class="chips">
         <button
@@ -57,6 +63,7 @@
       </div>
       <div class="time">
         {{ d(new Date(message.created_at), 'time') }}
+        <span v-if="isScheduled" class="scheduled">🕐 {{ t('chat.scheduled') }}</span>
         <span v-if="message.edited_at" class="edited">{{ t('chat.edited') }}</span>
         <span v-if="message.delivery_state === 'queued'">{{ t('chat.queued') }}</span>
         <span v-else-if="message.delivery_state === 'sending'">{{ t('chat.sending') }}</span>
@@ -81,6 +88,7 @@ import { useI18n } from 'vue-i18n';
 import type { Message } from '@/api/types';
 import FileMessage from './FileMessage.vue';
 import ImageMessage from './ImageMessage.vue';
+import LinkPreviewCard from './LinkPreviewCard.vue';
 import VideoPlayer from './VideoPlayer.vue';
 import VoiceNotePlayer from './VoiceNotePlayer.vue';
 
@@ -126,6 +134,32 @@ const { d, t } = useI18n();
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
 const isPending = computed(() => props.message.id.startsWith('pending-'));
+const isScheduled = computed(() => {
+  if (!props.message.scheduled_at) return false;
+  const ts = new Date(props.message.scheduled_at).getTime();
+  return Number.isFinite(ts) && ts > Date.now();
+});
+const mentionedMe = computed(() =>
+  Boolean(props.currentUserId && (props.message.mentions || []).includes(props.currentUserId))
+);
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+const textSegments = computed<Array<{ text: string; mention: boolean }>>(() => {
+  const value = props.message.text || '';
+  if (!mentionedMe.value) return [{ text: value, mention: false }];
+  const me = props.participants?.find((user) => user.id === props.currentUserId);
+  const tokens = new Set<string>();
+  if (me) {
+    if (me.display_name) tokens.add(`@${me.display_name}`);
+    if (me.username) tokens.add(`@${me.username}`);
+  }
+  const pattern = tokens.size
+    ? new RegExp(`(${[...tokens].map(escapeRegExp).join('|')})`, 'g')
+    : /(@[^\s@]+)/g;
+  const parts = value.split(pattern).filter((part) => part.length > 0);
+  return parts.map((part) => ({ text: part, mention: part.startsWith('@') }));
+});
 const isFailed = computed(() => props.message.delivery_state === 'failed');
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
 const canEdit = computed(
@@ -412,5 +446,15 @@ em {
 .edited {
   margin-right: 4px;
   font-style: italic;
+}
+.scheduled {
+  margin-right: 4px;
+  color: var(--relay-muted);
+}
+mark.mention {
+  border-radius: 4px;
+  padding: 0 2px;
+  background: rgba(64, 140, 255, 0.45);
+  color: inherit;
 }
 </style>
