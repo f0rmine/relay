@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     )
     upload_dir: Path = Path("./uploads")
     max_upload_size_mb: int = Field(default=10, ge=1, le=100)
+    max_video_size_mb: int = Field(default=100, ge=1, le=2000)
     upload_daily_size_limit_mb: int = Field(default=1024, ge=1, le=1_000_000)
     orphan_attachment_ttl_hours: int = Field(default=24, ge=1, le=720)
     message_rate_limit_per_minute: int = Field(default=30, ge=20, le=40)
@@ -146,6 +147,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
+
+    @property
+    def max_video_size_bytes(self) -> int:
+        return self.max_video_size_mb * 1024 * 1024
 
 
 @lru_cache

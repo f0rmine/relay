@@ -47,6 +47,8 @@ export interface Conversation {
   id: string;
   kind: string;
   title?: string | null;
+  avatar_url?: string | null;
+  first_unread_id?: string | null;
   is_admin?: boolean;
   admin_ids?: string[];
   pinned_message_id?: string | null;

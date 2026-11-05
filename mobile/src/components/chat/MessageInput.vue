@@ -19,7 +19,7 @@
       <ion-button v-if="!editingMessage" fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
         <ion-icon :icon="attachOutline" />
       </ion-button>
-      <input ref="fileInput" class="hidden" type="file" @change="onFile" />
+      <input ref="fileInput" class="hidden" type="file" accept="image/*,video/*,audio/*,application/pdf,text/plain,.doc,.docx" @change="onFile" />
       <div class="input-shell">
         <textarea
           ref="textInput"
