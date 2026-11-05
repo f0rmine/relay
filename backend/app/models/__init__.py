@@ -7,6 +7,7 @@ from app.models.link_preview import LinkPreview
 from app.models.message import Message, MessageReaction, MessageRead
 from app.models.recovery_code import RecoveryCode
 from app.models.user import User
+from app.models.user_block import UserBlock
 from app.models.user_device import UserDevice
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "RecoveryCode",
     "RefreshToken",
     "User",
+    "UserBlock",
     "UserDevice",
 ]

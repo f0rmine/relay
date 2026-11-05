@@ -11,8 +11,8 @@
     <ion-content class="page-content">
       <ErrorState v-if="error" :message="error" />
       <div class="wrap">
-        <Avatar :name="conversation?.title || t('conversations.groupChat')" :url="conversation?.avatar_url" :size="72" />
-        <h2>{{ conversation?.title }}</h2>
+        <Avatar :name="displayTitle" :url="displayAvatarUrl" :size="72" />
+        <h2>{{ displayTitle }}</h2>
         <p class="muted">{{ membersLabel }}</p>
         <input ref="avatarInput" type="file" accept="image/*" hidden @change="uploadAvatar" />
         <ion-button v-if="isAdmin" fill="outline" :disabled="uploadingAvatar" @click="avatarInput?.click()">
@@ -59,6 +59,56 @@
         <UserSearchList @toggle="addMember" />
       </div>
 
+      <h3 class="section">{{ t('chat.disappearingTitle') }}</h3>
+      <ErrorState v-if="disappearingError" :message="disappearingError" />
+      <ion-list>
+        <ion-item>
+          <ion-select
+            v-model="disappearingValue"
+            :label="t('chat.disappearingTitle')"
+            label-placement="stacked"
+            :disabled="disappearingSaving"
+            @ionChange="updateDisappearing"
+          >
+            <ion-select-option value="off">{{ t('chat.disappearingOff') }}</ion-select-option>
+            <ion-select-option value="60">{{ t('chat.disappearing1m') }}</ion-select-option>
+            <ion-select-option value="3600">{{ t('chat.disappearing1h') }}</ion-select-option>
+            <ion-select-option value="86400">{{ t('chat.disappearing1d') }}</ion-select-option>
+            <ion-select-option value="604800">{{ t('chat.disappearing7d') }}</ion-select-option>
+          </ion-select>
+        </ion-item>
+      </ion-list>
+
+      <template v-if="isGroup">
+        <h3 class="section">{{ t('groups.inviteTitle') }}</h3>
+        <ErrorState v-if="inviteError" :message="inviteError" />
+        <div class="invite-section">
+          <p v-if="inviteUrl" class="muted invite-url">{{ inviteUrl }}</p>
+          <div v-if="inviteQrDataUrl" class="qr-wrap">
+            <img :src="inviteQrDataUrl" :alt="t('groups.inviteTitle')" class="qr-code" />
+          </div>
+          <ion-button
+            expand="block"
+            fill="outline"
+            :disabled="inviteBusy"
+            @click="createInvite"
+          >
+            {{ t('groups.copyInvite') }}
+          </ion-button>
+          <ion-button
+            v-if="inviteUrl"
+            expand="block"
+            fill="clear"
+            color="danger"
+            :disabled="inviteBusy"
+            @click="revokeInvite"
+          >
+            {{ t('groups.inviteRevoke') }}
+          </ion-button>
+          <p v-if="inviteStatus" class="muted export-status">{{ inviteStatus }}</p>
+        </div>
+      </template>
+
       <div class="export-section">
         <ion-button expand="block" fill="outline" :disabled="exporting" @click="startExport">
           {{ exporting ? t('chat.exportingChat') : t('chat.exportChat') }}
@@ -66,7 +116,7 @@
         <p v-if="exportStatus" class="muted export-status">{{ exportStatus }}</p>
       </div>
 
-      <ion-button v-if="isMember" expand="block" fill="clear" color="danger" class="leave" @click="leave">
+      <ion-button v-if="isGroup && isMember" expand="block" fill="clear" color="danger" class="leave" @click="leave">
         {{ t('groups.leave') }}
       </ion-button>
     </ion-content>
@@ -87,12 +137,16 @@ import {
   IonLabel,
   IonList,
   IonPage,
+  IonSelect,
+  IonSelectOption,
   IonTitle,
   IonToolbar
 } from '@ionic/vue';
+import { Capacitor } from '@capacitor/core';
 import { useI18n } from 'vue-i18n';
+import QRCode from 'qrcode';
 import { apiBlob, apiFetch, displayError } from '@/api/client';
-import type { Conversation, User } from '@/api/types';
+import type { Conversation, InviteCreateResult, User } from '@/api/types';
 import Avatar from '@/components/users/Avatar.vue';
 import ErrorState from '@/components/ErrorState.vue';
 import UserSearchList from '@/components/users/UserSearchList.vue';
@@ -113,6 +167,14 @@ const titleDraft = ref('');
 const exporting = ref(false);
 const exportStatus = ref('');
 let exportPollTimer: number | null = null;
+const disappearingValue = ref('off');
+const disappearingSaving = ref(false);
+const disappearingError = ref('');
+const inviteUrl = ref('');
+const inviteQrDataUrl = ref<string | null>(null);
+const inviteBusy = ref(false);
+const inviteError = ref('');
+const inviteStatus = ref('');
 
 function stopExportPoll() {
   if (exportPollTimer) window.clearInterval(exportPollTimer);
@@ -122,6 +184,7 @@ function stopExportPoll() {
 onUnmounted(stopExportPoll);
 
 const conversation = computed(() => conversations.items.find((item) => item.id === conversationId));
+const isGroup = computed(() => conversation.value?.kind === 'group');
 const isAdmin = computed(() => Boolean(conversation.value?.is_admin));
 const isMember = computed(() => Boolean(conversation.value));
 const me = computed(() => auth.user?.id || '');
@@ -129,14 +192,99 @@ const adminIds = computed(() => new Set(conversation.value?.admin_ids || []));
 const membersLabel = computed(
   () => `${conversation.value?.participants?.length || 0} ${t('groups.members')}`
 );
+const peer = computed(() => conversation.value?.participants.find((user) => user.id !== me.value));
+const displayTitle = computed(() =>
+  isGroup.value
+    ? conversation.value?.title || t('conversations.groupChat')
+    : peer.value?.display_name || t('common.user')
+);
+const displayAvatarUrl = computed(() =>
+  isGroup.value ? conversation.value?.avatar_url : peer.value?.avatar_url
+);
 
 async function refresh() {
   try {
     const fresh = await apiFetch<Conversation>(`/conversations/${conversationId}`);
     conversations.applyConversationInfo(fresh);
     if (!titleDraft.value) titleDraft.value = fresh.title || '';
+    disappearingValue.value =
+      fresh.disappearing_after_seconds == null ? 'off' : String(fresh.disappearing_after_seconds);
   } catch (err: unknown) {
     error.value = displayError(err, t('chat.loadFailed'));
+  }
+}
+
+async function updateDisappearing() {
+  disappearingSaving.value = true;
+  disappearingError.value = '';
+  try {
+    const seconds = disappearingValue.value === 'off' ? null : Number(disappearingValue.value);
+    const updated = await apiFetch<Conversation>(`/conversations/${conversationId}/disappearing`, {
+      method: 'PATCH',
+      body: JSON.stringify({ seconds })
+    });
+    conversations.applyConversationInfo(updated);
+    disappearingValue.value =
+      updated.disappearing_after_seconds == null ? 'off' : String(updated.disappearing_after_seconds);
+  } catch (err: unknown) {
+    disappearingError.value = displayError(err, t('chat.disappearingUpdateFailed'));
+  } finally {
+    disappearingSaving.value = false;
+  }
+}
+
+function fullInviteUrl(inviteUrlValue: string): string {
+  if (inviteUrlValue.startsWith('http://') || inviteUrlValue.startsWith('https://')) return inviteUrlValue;
+  const path = inviteUrlValue.startsWith('/') ? inviteUrlValue : `/${inviteUrlValue}`;
+  return `${window.location.origin}${path}`;
+}
+
+async function copyInviteText(value: string) {
+  if (Capacitor.isNativePlatform()) {
+    const { Clipboard } = await import('@capacitor/clipboard');
+    await Clipboard.write({ string: value });
+  } else {
+    await navigator.clipboard.writeText(value);
+  }
+}
+
+async function createInvite() {
+  inviteBusy.value = true;
+  inviteError.value = '';
+  inviteStatus.value = '';
+  try {
+    const created = await apiFetch<InviteCreateResult>(`/conversations/${conversationId}/invite`, {
+      method: 'POST'
+    });
+    const url = fullInviteUrl(created.invite_url);
+    inviteUrl.value = url;
+    try {
+      inviteQrDataUrl.value = await QRCode.toDataURL(url);
+    } catch {
+      inviteQrDataUrl.value = null;
+    }
+    await copyInviteText(url);
+    inviteStatus.value = t('groups.inviteCopied');
+  } catch (err: unknown) {
+    inviteError.value = displayError(err, t('groups.inviteFailed'));
+  } finally {
+    inviteBusy.value = false;
+  }
+}
+
+async function revokeInvite() {
+  inviteBusy.value = true;
+  inviteError.value = '';
+  inviteStatus.value = '';
+  try {
+    await apiFetch(`/conversations/${conversationId}/invite/revoke`, { method: 'POST' });
+    inviteUrl.value = '';
+    inviteQrDataUrl.value = null;
+    inviteStatus.value = t('groups.inviteRevoked');
+  } catch (err: unknown) {
+    inviteError.value = displayError(err, t('groups.inviteRevokeFailed'));
+  } finally {
+    inviteBusy.value = false;
   }
 }
 
@@ -295,6 +443,27 @@ async function startExport() {
 .action,
 .leave {
   margin-top: 8px;
+}
+.invite-section {
+  margin: 8px 16px 0;
+  display: grid;
+  gap: 8px;
+}
+.invite-url {
+  margin: 0;
+  font-size: 12px;
+  word-break: break-all;
+}
+.qr-wrap {
+  display: grid;
+  justify-items: center;
+  margin: 4px 0;
+}
+.qr-code {
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+  background: #fff;
 }
 .export-section {
   margin: 12px 16px 0;

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +17,10 @@ class Conversation(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(700), nullable=True)
     pinned_message_id: Mapped[str | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL", use_alter=True, name="fk_conversations_pinned_message"), nullable=True
+    )
+    disappearing_after_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    invite_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

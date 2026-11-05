@@ -62,6 +62,7 @@ def serialize_message(message: Message) -> dict:
                 "scheduled_at": message.scheduled_at,
                 "mentions": [],
                 "link_preview": None,
+                "expires_at": message.expires_at,
             }
         )
     text = _safe_text(message)
@@ -86,6 +87,7 @@ def serialize_message(message: Message) -> dict:
             "scheduled_at": message.scheduled_at,
             "mentions": parse_mentions(message),
             "link_preview": link_preview,
+            "expires_at": message.expires_at,
         }
     )
 

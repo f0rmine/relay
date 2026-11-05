@@ -53,7 +53,11 @@ const backendErrorKeys: Record<string, string> = {
   'Unsupported avatar image type': 'api.errors.unsupportedAvatarType',
   'Avatar extension does not match file type': 'api.errors.avatarTypeMismatch',
   'Avatar content does not match file type': 'api.errors.avatarContentMismatch',
-  'Avatar is too large': 'api.errors.avatarTooLarge'
+  'Avatar is too large': 'api.errors.avatarTooLarge',
+  'Cannot block yourself': 'api.errors.selfBlock',
+  'Invalid invite link': 'api.errors.invalidInvite',
+  'Only group chats can be invited': 'api.errors.groupOnlyInvite',
+  'Disappearing interval must be within 30 days': 'api.errors.invalidDisappearing'
 };
 
 function localizeBackendError(message: string): string {

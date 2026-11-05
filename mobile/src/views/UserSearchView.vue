@@ -12,7 +12,7 @@
     <ion-content class="page-content">
       <ErrorState v-if="error" :message="error" />
       <ion-list v-if="results.length">
-        <UserSearchResult v-for="user in results" :key="user.id" :user="user" @select="startChat" />
+        <UserSearchResult v-for="user in results" :key="user.id" :user="user" show-block @select="startChat" @block="blockUser" />
       </ion-list>
       <EmptyState v-else :title="t('search.emptyTitle')" :text="t('search.emptyText')" />
     </ion-content>
@@ -29,6 +29,7 @@ import type { User } from '@/api/types';
 import EmptyState from '@/components/EmptyState.vue';
 import ErrorState from '@/components/ErrorState.vue';
 import UserSearchResult from '@/components/users/UserSearchResult.vue';
+import { useBlocksStore } from '@/stores/blocks';
 import { useConversationsStore } from '@/stores/conversations';
 
 const query = ref('');
@@ -36,6 +37,7 @@ const results = ref<User[]>([]);
 const error = ref('');
 const router = useRouter();
 const conversations = useConversationsStore();
+const blocks = useBlocksStore();
 const { t } = useI18n();
 let searchSequence = 0;
 
@@ -52,6 +54,16 @@ async function search() {
     if (sequence === searchSequence) results.value = response;
   } catch (err: unknown) {
     if (sequence === searchSequence) error.value = displayError(err, t('search.failed'));
+  }
+}
+
+async function blockUser(user: User) {
+  error.value = '';
+  try {
+    await blocks.block(user.id);
+    results.value = results.value.filter((item) => item.id !== user.id);
+  } catch (err: unknown) {
+    error.value = displayError(err, t('search.blockFailed'));
   }
 }
 

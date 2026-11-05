@@ -3,7 +3,7 @@ import base64
 import binascii
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -27,9 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def visible_messages_clause(now: datetime | None = None):
-    """SQLAlchemy clause: message is due (immediate or scheduled time reached)."""
+    """SQLAlchemy clause: message is due and not yet expired."""
     moment = now or datetime.now(UTC)
-    return or_(Message.scheduled_at.is_(None), Message.scheduled_at <= moment)
+    return and_(
+        or_(Message.scheduled_at.is_(None), Message.scheduled_at <= moment),
+        or_(Message.expires_at.is_(None), Message.expires_at > moment),
+    )
 
 
 def parse_mentions(message: Message) -> list[str]:
@@ -135,6 +138,13 @@ async def create_message(
 ) -> Message:
     attachment_ids = attachment_ids or []
     conversation = await require_participant(db, conversation_id, user.id)
+    if conversation.kind == "private":
+        from app.services.blocks import is_blocked
+
+        others = [p.user_id for p in conversation.participants if p.user_id != user.id]
+        for other_id in others:
+            if await is_blocked(db, user.id, other_id):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
     if not (text and text.strip()) and not attachment_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Message text or attachment is required")
     await validate_reply_target(db, conversation_id, reply_to_id)
@@ -163,6 +173,10 @@ async def create_message(
         if len(attachments) != len(set(attachment_ids)):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid attachment")
     now = datetime.now(UTC)
+    expires_at = None
+    disappearing = getattr(conversation, "disappearing_after_seconds", None)
+    if disappearing:
+        expires_at = now + timedelta(seconds=disappearing)
     message_id = str(uuid4())
     normalized_text = text.strip() if text else None
     encrypted_text = (
@@ -188,6 +202,7 @@ async def create_message(
         updated_at=now,
         scheduled_at=scheduled_at,
         mentions=mentions_json,
+        expires_at=expires_at,
     )
     db.add(message)
     await db.flush()
@@ -579,3 +594,71 @@ async def scheduled_dispatcher() -> None:
             raise
         except Exception:
             logger.exception("Scheduled dispatcher cycle failed")
+
+
+async def sweep_disappearing_messages(db=None) -> int:
+    """Hard-delete expired messages and broadcast message:deleted (best effort)."""
+    from app.core.database import AsyncSessionLocal
+    from app.core.redis import get_redis
+    from app.models.conversation import ConversationParticipant
+    from app.websocket.manager import manager
+
+    if db is None:
+        async with AsyncSessionLocal() as session:
+            return await sweep_disappearing_messages(session)
+    now = datetime.now(UTC)
+    expired = list(
+        (
+            await db.scalars(
+                select(Message)
+                .where(
+                    Message.expires_at.is_not(None),
+                    Message.expires_at <= now,
+                )
+                .order_by(Message.expires_at)
+                .limit(500)
+            )
+        ).all()
+    )
+    if not expired:
+        return 0
+    # Capture participants before deleting rows.
+    affected: list[tuple[str, str, list[str]]] = []
+    for message in expired:
+        participant_ids = list(
+            (
+                await db.scalars(
+                    select(ConversationParticipant.user_id).where(
+                        ConversationParticipant.conversation_id == message.conversation_id
+                    )
+                )
+            ).all()
+        )
+        affected.append((message.id, message.conversation_id, participant_ids))
+        await db.delete(message)
+    await db.commit()
+    redis = None
+    for message_id, conversation_id, participant_ids in affected:
+        try:
+            if redis is None:
+                redis = await get_redis()
+            await manager.broadcast_to_users(
+                redis,
+                participant_ids,
+                "message:deleted",
+                {"message_id": message_id, "conversation_id": conversation_id},
+            )
+        except Exception:
+            logger.exception("Disappearing broadcast failed for message %s", message_id)
+    return len(affected)
+
+
+async def disappearing_sweeper() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await sweep_disappearing_messages()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Disappearing sweep failed")

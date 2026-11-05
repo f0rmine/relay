@@ -54,6 +54,29 @@
         </ion-item>
       </ion-list>
 
+      <h3 class="section">{{ t('profile.blocked.title') }}</h3>
+      <ErrorState v-if="blockedError" :message="blockedError" />
+      <ion-list v-if="blocks.blocked.length" class="profile-list">
+        <ion-item v-for="user in blocks.blocked" :key="user.id">
+          <Avatar slot="start" :name="user.display_name" :url="user.avatar_url" :size="34" />
+          <ion-label>
+            <h3>{{ user.display_name }}</h3>
+            <p>@{{ user.username }}</p>
+          </ion-label>
+          <ion-button
+            slot="end"
+            fill="clear"
+            color="danger"
+            size="small"
+            :disabled="unblockingId === user.id"
+            @click="unblock(user.id)"
+          >
+            {{ t('profile.blocked.unblock') }}
+          </ion-button>
+        </ion-item>
+      </ion-list>
+      <p v-else class="muted hint">{{ t('profile.blocked.empty') }}</p>
+
       <h3 class="section">{{ t('profile.twoFactor.title') }}</h3>
       <ErrorState v-if="twoFactorError" :message="twoFactorError" />
       <ion-list class="profile-list">
@@ -187,10 +210,12 @@ import ErrorState from '@/components/ErrorState.vue';
 import Avatar from '@/components/users/Avatar.vue';
 import LanguageSelector from '@/components/LanguageSelector.vue';
 import { useAuthStore } from '@/stores/auth';
+import { useBlocksStore } from '@/stores/blocks';
 import { applyTheme, currentTheme, setTheme, type ThemeName } from '@/services/theme';
 import { decodeJwtPayload } from '@/services/jwt';
 
 const auth = useAuthStore();
+const blocks = useBlocksStore();
 const router = useRouter();
 const displayName = ref('');
 const email = ref('');
@@ -216,10 +241,35 @@ const deleteConfirmInput = ref('');
 const deleteError = ref('');
 const deleting = ref(false);
 
+const blockedError = ref('');
+const unblockingId = ref<string | null>(null);
+
+async function loadBlocked() {
+  blockedError.value = '';
+  try {
+    await blocks.fetchBlocked();
+  } catch (err: unknown) {
+    blockedError.value = displayError(err, t('profile.blocked.loadFailed'));
+  }
+}
+
+async function unblock(userId: string) {
+  unblockingId.value = userId;
+  blockedError.value = '';
+  try {
+    await blocks.unblock(userId);
+  } catch (err: unknown) {
+    blockedError.value = displayError(err, t('profile.blocked.unblockFailed'));
+  } finally {
+    unblockingId.value = null;
+  }
+}
+
 onMounted(() => {
   displayName.value = auth.user?.display_name || '';
   email.value = auth.user?.email || '';
   void refreshMe();
+  void loadBlocked();
 });
 
 async function refreshMe() {

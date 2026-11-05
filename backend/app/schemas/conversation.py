@@ -24,11 +24,16 @@ class ParticipantIdsRequest(BaseModel):
     participant_ids: list[str] = Field(min_length=1, max_length=100)
 
 
+class DisappearingUpdate(BaseModel):
+    seconds: int | None = None
+
+
 class ConversationOut(BaseModel):
     id: str
     kind: str = "private"
     title: str | None = None
     avatar_url: str | None = None
+    disappearing_after_seconds: int | None = None
     is_admin: bool = False
     admin_ids: list[str] = Field(default_factory=list)
     participants: list[UserSearchResult]

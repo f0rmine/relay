@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ApiError, apiFetch, markAuthCleared } from '@/api/client';
 import type { TokenResponse, TwoFactorChallenge, User } from '@/api/types';
+import { useBlocksStore } from '@/stores/blocks';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
@@ -175,6 +176,7 @@ export const useAuthStore = defineStore('auth', {
       const previousUserId = this.user?.id;
       useConversationsStore().reset();
       useMessagesStore().reset();
+      useBlocksStore().reset();
       this.user = null;
       this.accessToken = null;
       this.refreshToken = null;
