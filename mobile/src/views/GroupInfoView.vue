@@ -11,9 +11,13 @@
     <ion-content class="page-content">
       <ErrorState v-if="error" :message="error" />
       <div class="wrap">
-        <Avatar :name="conversation?.title || t('conversations.groupChat')" :size="72" />
+        <Avatar :name="conversation?.title || t('conversations.groupChat')" :url="conversation?.avatar_url" :size="72" />
         <h2>{{ conversation?.title }}</h2>
         <p class="muted">{{ membersLabel }}</p>
+        <input ref="avatarInput" type="file" accept="image/*" hidden @change="uploadAvatar" />
+        <ion-button v-if="isAdmin" fill="outline" :disabled="uploadingAvatar" @click="avatarInput?.click()">
+          {{ t('groups.changeAvatar') }}
+        </ion-button>
       </div>
 
       <ion-list v-if="isAdmin">
@@ -96,6 +100,8 @@ const { t } = useI18n();
 const conversationId = String(route.params.id);
 const error = ref('');
 const saving = ref(false);
+const uploadingAvatar = ref(false);
+const avatarInput = ref<HTMLInputElement | null>(null);
 const titleDraft = ref('');
 
 const conversation = computed(() => conversations.items.find((item) => item.id === conversationId));
@@ -134,6 +140,36 @@ async function saveTitle() {
     error.value = displayError(err, t('groups.updateFailed'));
   } finally {
     saving.value = false;
+  }
+}
+
+const allowedAvatarTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+async function uploadAvatar(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  if (!allowedAvatarTypes.has(file.type)) {
+    error.value = t('groups.avatarTypeFailed');
+    if (avatarInput.value) avatarInput.value.value = '';
+    return;
+  }
+  uploadingAvatar.value = true;
+  error.value = '';
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const updated = await apiFetch<Conversation>(`/conversations/${conversationId}/avatar`, {
+      method: 'PUT',
+      body: form
+    });
+    conversations.applyConversationInfo(updated);
+  } catch (err: unknown) {
+    error.value = t('groups.avatarUploadFailed', {
+      error: displayError(err, t('profile.unknownError'))
+    });
+  } finally {
+    uploadingAvatar.value = false;
+    if (avatarInput.value) avatarInput.value.value = '';
   }
 }
 

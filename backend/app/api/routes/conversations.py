@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, File, Query, UploadFile
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -21,6 +22,7 @@ from app.schemas.user import UserSearchResult
 from app.services.conversations import (
     add_group_participants,
     create_group_conversation,
+    first_unread_ids,
     get_or_create_private_conversation,
     latest_messages,
     leave_conversation,
@@ -30,6 +32,7 @@ from app.services.conversations import (
     rename_group,
     require_group_admin,
     require_participant,
+    save_group_avatar,
     set_pinned_message,
     unread_counts,
 )
@@ -56,6 +59,7 @@ async def serialize_conversations(
     online = await online_map(redis, list(users_by_id))
     latest_by_conversation = await latest_messages(db, conversation_ids)
     unread_by_conversation = await unread_counts(db, conversation_ids, current_user_id)
+    first_unread_by_conversation = await first_unread_ids(db, conversation_ids, current_user_id)
     serialized: list[ConversationOut] = []
     for conversation in conversations:
         if sa_inspect(conversation).expired:
@@ -67,6 +71,7 @@ async def serialize_conversations(
                 id=conversation.id,
                 kind=conversation.kind,
                 title=conversation.title if conversation.kind == "group" else None,
+                avatar_url=conversation.avatar_url if conversation.kind == "group" else None,
                 is_admin=any(
                     participant.user_id == current_user_id and participant.is_admin
                     for participant in conversation.participants
@@ -90,6 +95,7 @@ async def serialize_conversations(
                 latest_message=serialize_message(latest) if latest else None,
                 pinned_message_id=conversation.pinned_message_id,
                 unread_count=unread_by_conversation[conversation.id],
+                first_unread_id=first_unread_by_conversation.get(conversation.id),
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
@@ -143,6 +149,27 @@ async def update_group(
 ) -> ConversationDetail:
     conversation = await require_group_admin(db, conversation_id, current_user.id)
     conversation = await rename_group(db, conversation, payload.title)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
+
+
+@router.put("/{conversation_id}/avatar", response_model=ConversationDetail)
+async def update_group_avatar(
+    conversation_id: str,
+    current_user: CurrentUser,
+    db: DbSession,
+    file: Annotated[UploadFile, File(...)],
+) -> ConversationDetail:
+    conversation = await require_group_admin(db, conversation_id, current_user.id)
+    conversation = await save_group_avatar(db, conversation, file)
+    conversation = await require_participant(db, conversation_id, current_user.id)
     serialized = await serialize_conversation(db, conversation, current_user.id)
     redis = await get_redis()
     await manager.broadcast_to_users(

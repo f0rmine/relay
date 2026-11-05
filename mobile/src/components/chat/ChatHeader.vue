@@ -4,7 +4,7 @@
       <ion-back-button default-href="/conversations" text="" />
     </ion-buttons>
     <div class="chat-title" @click="openInfo">
-      <Avatar :name="title || t('common.user')" :url="group ? undefined : peer?.avatar_url" :size="34" />
+      <Avatar :name="title || t('common.user')" :url="avatarUrl" :size="34" />
       <div>
         <strong>{{ title }}</strong>
         <OnlineStatusBadge
@@ -38,6 +38,9 @@ const router = useRouter();
 const { t } = useI18n();
 
 const group = computed(() => props.conversation?.kind === 'group');
+const avatarUrl = computed(() =>
+  group.value ? props.conversation?.avatar_url : props.peer?.avatar_url
+);
 const title = computed(() =>
   group.value ? props.conversation?.title || t('conversations.groupChat') : props.peer?.display_name || t('common.chat')
 );

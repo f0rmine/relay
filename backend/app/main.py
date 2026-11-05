@@ -129,7 +129,7 @@ settings = get_settings()
 get_encryption_keyring()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.6.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.6.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -155,12 +155,16 @@ MAX_JSON_BODY_BYTES = 1_048_576
 BODY_CAP_EXEMPT_PATHS = ("/attachments/upload", "/users/me/avatar")
 
 
+def _is_body_cap_exempt(request: Request) -> bool:
+    if request.url.path.startswith(BODY_CAP_EXEMPT_PATHS):
+        return True
+    # Multipart avatar uploads (user + group) may exceed the 1MB JSON cap.
+    return request.method in {"PUT", "POST"} and request.url.path.endswith("/avatar")
+
+
 @app.middleware("http")
 async def limit_request_body(request: Request, call_next):
-    if (
-        request.method in {"POST", "PUT", "PATCH"}
-        and not request.url.path.startswith(BODY_CAP_EXEMPT_PATHS)
-    ):
+    if request.method in {"POST", "PUT", "PATCH"} and not _is_body_cap_exempt(request):
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > MAX_JSON_BODY_BYTES:
             return JSONResponse(

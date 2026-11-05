@@ -3,11 +3,18 @@
     <div
       class="bubble"
       :class="{ pending: isPending, failed: isFailed, deleted: message.deleted_at, highlighted: highlight }"
+      :style="swipeStyle"
       @touchstart="startPress"
+      @touchmove="onTouchMove"
       @touchend="cancelPress"
       @touchcancel="cancelPress"
       @contextmenu.prevent="openActions"
     >
+      <span
+        v-if="swipeOffset > 8"
+        class="swipe-hint"
+        :style="{ opacity: Math.min(1, swipeOffset / 60) }"
+      >↩️</span>
       <div v-if="message.reply_to" class="quoted" @click.stop="emit('open-reply', message.reply_to.id)">
         <span class="quoted-name">{{ replyAuthorName }}</span>
         <span class="quoted-text">{{ quotedPreview }}</span>
@@ -21,11 +28,15 @@
         <p v-else-if="message.text">{{ message.text }}</p>
         <template v-for="attachment in message.attachments" :key="attachment.id">
           <VoiceNotePlayer
-            v-if="attachment.mime_type.startsWith('audio/') && !attachment.id.startsWith('local-')"
+            v-if="attachment.mime_type?.startsWith('audio/') && !attachment.id.startsWith('local-')"
             :attachment-id="attachment.id"
           />
+          <VideoPlayer
+            v-else-if="attachment.mime_type?.startsWith('video/')"
+            :attachment="attachment"
+          />
           <ImageMessage
-            v-else-if="attachment.mime_type.startsWith('image/')"
+            v-else-if="attachment.mime_type?.startsWith('image/')"
             :attachment="attachment"
             @open="emit('open-image', { messageId: message.id, attachmentId: attachment.id })"
           />
@@ -70,6 +81,7 @@ import { useI18n } from 'vue-i18n';
 import type { Message } from '@/api/types';
 import FileMessage from './FileMessage.vue';
 import ImageMessage from './ImageMessage.vue';
+import VideoPlayer from './VideoPlayer.vue';
 import VoiceNotePlayer from './VoiceNotePlayer.vue';
 
 const props = defineProps<{
@@ -99,6 +111,16 @@ const emit = defineEmits<{
 
 const actionsOpen = ref(false);
 let pressTimer: number | undefined;
+const swipeOffset = ref(0);
+let touchStartX = 0;
+let touchStartY = 0;
+let touchActive = false;
+let swipeFired = false;
+let pressFired = false;
+const swipeStyle = computed(() => {
+  if (!swipeOffset.value) return undefined;
+  return { transform: `translateX(${swipeOffset.value}px)` };
+});
 const { d, t } = useI18n();
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
@@ -171,15 +193,55 @@ function openActions() {
   actionsOpen.value = true;
 }
 
-function startPress() {
+function startPress(event?: TouchEvent) {
   if (isPending.value) return;
-  cancelPress();
-  pressTimer = window.setTimeout(openActions, 500);
+  // Don't start long-press / swipe when the touch began on an interactive child.
+  const target = event?.target as HTMLElement | null;
+  if (target?.closest?.('button, a, video, input, textarea')) return;
+  clearPressTimer();
+  pressFired = false;
+  swipeFired = false;
+  swipeOffset.value = 0;
+  touchActive = false;
+  const touch = event?.touches?.[0] ?? event?.changedTouches?.[0];
+  if (touch) {
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchActive = true;
+  }
+  pressTimer = window.setTimeout(() => {
+    pressFired = true;
+    openActions();
+  }, 500);
+}
+
+function clearPressTimer() {
+  if (pressTimer) window.clearTimeout(pressTimer);
+  pressTimer = undefined;
+}
+
+function onTouchMove(event: TouchEvent) {
+  if (!touchActive || pressFired || swipeFired || isPending.value) return;
+  const touch = event.touches?.[0] ?? event.changedTouches?.[0];
+  if (!touch) return;
+  const dx = touch.clientX - touchStartX;
+  const dy = touch.clientY - touchStartY;
+  // Moving the finger cancels the long-press so swipe and long-press don't fight.
+  if (Math.abs(dx) > 10 || Math.abs(dy) > 10) clearPressTimer();
+  swipeOffset.value = dx > 0 ? Math.min(dx, 72) : 0;
+  if (dx > 60 && Math.abs(dy) < 30) {
+    swipeFired = true;
+    clearPressTimer();
+    swipeOffset.value = 0;
+    touchActive = false;
+    emit('reply', props.message);
+  }
 }
 
 function cancelPress() {
-  if (pressTimer) window.clearTimeout(pressTimer);
-  pressTimer = undefined;
+  clearPressTimer();
+  swipeOffset.value = 0;
+  touchActive = false;
 }
 
 watch(
@@ -201,6 +263,7 @@ watch(
   justify-content: flex-end;
 }
 .bubble {
+  position: relative;
   max-width: min(78%, 560px);
   border-radius: 10px 10px 10px 4px;
   padding: 7px 9px 5px;
@@ -209,10 +272,25 @@ watch(
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  will-change: transform;
 }
 .own .bubble {
   background: var(--relay-bubble-own);
   border-radius: 10px 10px 4px 10px;
+}
+.swipe-hint {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  pointer-events: none;
 }
 .bubble.pending {
   opacity: 0.7;

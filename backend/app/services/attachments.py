@@ -30,6 +30,9 @@ ALLOWED_MIME_TYPES = {
     "image/png",
     "image/webp",
     "image/gif",
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
     "audio/mp4",
     "audio/webm",
     "audio/ogg",
@@ -45,6 +48,9 @@ ALLOWED_EXTENSIONS_BY_MIME_TYPE = {
     "image/png": {".png"},
     "image/webp": {".webp"},
     "image/gif": {".gif"},
+    "video/mp4": {".mp4"},
+    "video/quicktime": {".mov"},
+    "video/webm": {".webm"},
     "audio/mp4": {".m4a", ".mp4"},
     "audio/webm": {".webm"},
     "audio/ogg": {".ogg"},
@@ -84,6 +90,13 @@ def generate_thumbnail(data: bytes, mime_type: str) -> tuple[bytes, int, int] | 
 
 def is_image(mime_type: str) -> bool:
     return mime_type.startswith("image/")
+
+
+VIDEO_MIME_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
+
+
+def is_video(mime_type: str) -> bool:
+    return mime_type in VIDEO_MIME_TYPES
 
 
 def sniff_image_type(data: bytes) -> str | None:
@@ -131,7 +144,11 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
     if suffix not in ALLOWED_EXTENSIONS_BY_MIME_TYPE[content_type]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File extension does not match file type")
 
-    data = await read_upload_limited(file, settings.max_upload_size_bytes)
+    if is_video(content_type):
+        max_bytes = getattr(settings, "max_video_size_bytes", settings.max_upload_size_bytes)
+    else:
+        max_bytes = settings.max_upload_size_bytes
+    data = await read_upload_limited(file, max_bytes)
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file upload")
     if is_image(content_type) and sniff_image_type(data) != content_type:
