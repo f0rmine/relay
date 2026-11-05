@@ -12,6 +12,8 @@ from app.api.routes import (
     auth,
     conversations,
     devices,
+    exports,
+    link_previews,
     messages,
     search,
     users,
@@ -24,6 +26,8 @@ from app.core.observability import REQUEST_ID_HEADER, install_observability, met
 from app.core.redis import close_redis, get_redis, ping_redis
 from app.models.user import User
 from app.services.attachments import cleanup_orphan_attachments
+from app.services.exports import cleanup_old_exports, export_worker
+from app.services.messages import scheduled_dispatcher
 from app.services.presence import sweep_expired_presence
 from app.services.push import drain_push_tasks, push_queue_worker
 from app.websocket.manager import manager
@@ -59,6 +63,10 @@ async def lifespan(app: FastAPI):
     app.state.presence_sweeper_task = sweeper
     gc_task = asyncio.create_task(orphan_attachment_gc())
     app.state.attachment_gc_task = gc_task
+    scheduled_task = asyncio.create_task(scheduled_dispatcher())
+    app.state.scheduled_task = scheduled_task
+    export_task = asyncio.create_task(export_worker())
+    app.state.export_task = export_task
     try:
         yield
     finally:
@@ -74,6 +82,12 @@ async def lifespan(app: FastAPI):
         gc_task.cancel()
         with suppress(asyncio.CancelledError):
             await gc_task
+        scheduled_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduled_task
+        export_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await export_task
         await drain_push_tasks()
         app.state.redis_subscriber_task = None
         await close_redis()
@@ -123,13 +137,21 @@ async def orphan_attachment_gc() -> None:
             raise
         except Exception:
             logger.exception("Orphan attachment cleanup failed")
+        try:
+            exports_removed = await cleanup_old_exports()
+            if exports_removed:
+                logger.info("Cleaned up %s old exports", exports_removed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Old export cleanup failed")
 
 
 settings = get_settings()
 get_encryption_keyring()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.6.2", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.6.3", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -149,6 +171,8 @@ app.include_router(messages.router)
 app.include_router(search.router)
 app.include_router(attachments.router)
 app.include_router(devices.router)
+app.include_router(link_previews.router)
+app.include_router(exports.router)
 app.include_router(websocket_router)
 
 MAX_JSON_BODY_BYTES = 1_048_576

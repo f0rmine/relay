@@ -15,8 +15,11 @@
         <span v-else class="members">{{ membersLabel }}</span>
       </div>
     </div>
-    <ion-buttons v-if="group" slot="end">
-      <ion-button @click="goInfo" :aria-label="t('groups.info')">
+    <ion-buttons slot="end">
+      <ion-button v-if="conversation" @click="goMedia" :aria-label="t('chat.mediaGallery')">
+        <ion-icon :icon="imagesOutline" />
+      </ion-button>
+      <ion-button v-if="group" @click="goInfo" :aria-label="t('groups.info')">
         <ion-icon :icon="informationCircleOutline" />
       </ion-button>
     </ion-buttons>
@@ -27,7 +30,7 @@
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { IonBackButton, IonButton, IonButtons, IonIcon, IonToolbar } from '@ionic/vue';
-import { informationCircleOutline } from 'ionicons/icons';
+import { imagesOutline, informationCircleOutline } from 'ionicons/icons';
 import type { Conversation, User } from '@/api/types';
 import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/users/Avatar.vue';
@@ -51,6 +54,9 @@ const membersLabel = computed(() => {
 
 function goInfo() {
   if (props.conversation) void router.push(`/chat/${props.conversation.id}/info`);
+}
+function goMedia() {
+  if (props.conversation) void router.push(`/chat/${props.conversation.id}/media`);
 }
 function openInfo() {
   if (group.value) goInfo();

@@ -23,6 +23,14 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface LinkPreview {
+  url?: string | null;
+  title?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  image_attachment_id?: string | null;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -41,6 +49,9 @@ export interface Message {
   delivery_state?: 'queued' | 'sending' | 'failed';
   reactions?: Array<{ emoji: string; user_ids: string[] }>;
   reply_to?: { id: string; text?: string | null; sender_id: string; undecryptable?: boolean } | null;
+  scheduled_at?: string | null;
+  mentions?: string[];
+  link_preview?: LinkPreview | null;
 }
 
 export interface Conversation {

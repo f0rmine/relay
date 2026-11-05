@@ -89,11 +89,15 @@ async def list_conversations(db: AsyncSession, user_id: str) -> list[Conversatio
 async def latest_message(db: AsyncSession, conversation_id: str) -> Message | None:
     from sqlalchemy.orm import selectinload
 
+    now = datetime.now(UTC)
     return (
         await db.scalars(
             select(Message)
             .options(selectinload(Message.attachments), selectinload(Message.reads), selectinload(Message.reactions), selectinload(Message.reply_to))
-            .where(Message.conversation_id == conversation_id)
+            .where(
+                Message.conversation_id == conversation_id,
+                or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+            )
             .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
         )
@@ -105,6 +109,7 @@ async def latest_messages(
 ) -> dict[str, Message]:
     if not conversation_ids:
         return {}
+    now = datetime.now(UTC)
     ranked = (
         select(
             Message.id.label("message_id"),
@@ -115,7 +120,10 @@ async def latest_messages(
             )
             .label("position"),
         )
-        .where(Message.conversation_id.in_(conversation_ids))
+        .where(
+            Message.conversation_id.in_(conversation_ids),
+            or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+        )
         .subquery()
     )
     rows = (
@@ -139,10 +147,12 @@ async def unread_count(db: AsyncSession, conversation_id: str, user_id: str) -> 
         )
     ).first()
     last_read_at = participant.last_read_at if participant else None
+    now = datetime.now(UTC)
     stmt = select(func.count(Message.id)).where(
         Message.conversation_id == conversation_id,
         Message.sender_id != user_id,
         Message.deleted_at.is_(None),
+        or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
     )
     if last_read_at is not None:
         stmt = stmt.where(Message.created_at > last_read_at)
@@ -154,6 +164,7 @@ async def unread_counts(
 ) -> dict[str, int]:
     if not conversation_ids:
         return {}
+    now = datetime.now(UTC)
     rows = await db.execute(
         select(Message.conversation_id, func.count(Message.id))
         .join(
@@ -167,6 +178,7 @@ async def unread_counts(
             Message.conversation_id.in_(conversation_ids),
             Message.sender_id != user_id,
             Message.deleted_at.is_(None),
+            or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
             or_(
                 ConversationParticipant.last_read_at.is_(None),
                 Message.created_at > ConversationParticipant.last_read_at,
@@ -189,6 +201,7 @@ async def first_unread_ids(
 ) -> dict[str, str | None]:
     if not conversation_ids:
         return {}
+    now = datetime.now(UTC)
     ranked = (
         select(
             Message.id.label("message_id"),
@@ -211,6 +224,7 @@ async def first_unread_ids(
             Message.conversation_id.in_(conversation_ids),
             Message.sender_id != user_id,
             Message.deleted_at.is_(None),
+            or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
             or_(
                 ConversationParticipant.last_read_at.is_(None),
                 Message.created_at > ConversationParticipant.last_read_at,
@@ -245,6 +259,7 @@ async def mark_conversation_read(db: AsyncSession, conversation_id: str, user_id
         Message.sender_id != user_id,
         Message.deleted_at.is_(None),
         Message.created_at <= now,
+        or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
     )
     if previous_last_read_at is not None:
         unread_query = unread_query.where(Message.created_at > previous_last_read_at)

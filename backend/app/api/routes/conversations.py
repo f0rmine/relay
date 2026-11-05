@@ -298,10 +298,11 @@ async def get_messages(
     db: DbSession,
     cursor: str | None = Query(default=None, max_length=512),
     limit: int = Query(default=30, ge=1, le=100),
+    type: str | None = Query(default=None, pattern="^(media|files|audio)$"),
 ) -> MessageHistory:
     decoded_cursor = decode_message_cursor(cursor) if cursor else None
     rows, has_more = await list_messages(
-        db, current_user.id, conversation_id, decoded_cursor, limit
+        db, current_user.id, conversation_id, decoded_cursor, limit, message_type=type
     )
     items = [serialize_message(row) for row in rows]
     return MessageHistory(

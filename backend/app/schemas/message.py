@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,6 +12,8 @@ class MessageCreate(BaseModel):
     text: str | None = Field(default=None, max_length=4000)
     attachment_ids: list[str] = Field(default_factory=list, max_length=5)
     reply_to_id: str | None = Field(default=None, max_length=36)
+    scheduled_at: datetime | None = None
+    mentions: list[str] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def validate_content(self) -> "MessageCreate":
@@ -19,6 +21,13 @@ class MessageCreate(BaseModel):
             raise ValueError("Message text or attachment is required")
         if self.text:
             self.text = self.text.strip()
+        if self.scheduled_at is not None:
+            scheduled = self.scheduled_at
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=UTC)
+                self.scheduled_at = scheduled
+            if scheduled - datetime.now(UTC) > timedelta(days=30):
+                raise ValueError("Scheduled messages must be within 30 days")
         return self
 
 
@@ -50,6 +59,9 @@ class MessageOut(OrmModel):
     read_by: list[str] = Field(default_factory=list)
     reactions: list[ReactionOut] = Field(default_factory=list)
     reply_to: ReplyToOut | None = None
+    scheduled_at: datetime | None = None
+    mentions: list[str] = Field(default_factory=list)
+    link_preview: dict | None = None
 
 
 class MessageEdit(BaseModel):
