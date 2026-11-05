@@ -326,11 +326,9 @@ async function unpinMessage(_message: Message) {
 }
 
 function openGroupInfo() {
-  if (conversation.value?.kind === 'group') {
-    window.dispatchEvent(
-      new CustomEvent('relay:navigate', { detail: `/chat/${conversationId.value}/info` })
-    );
-  }
+  window.dispatchEvent(
+    new CustomEvent('relay:navigate', { detail: `/chat/${conversationId.value}/info` })
+  );
 }
 
 function clearHighlight() {

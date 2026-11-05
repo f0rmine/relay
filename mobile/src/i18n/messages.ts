@@ -88,7 +88,10 @@ export const messages = {
       emptyTitle: 'Find people',
       emptyText: 'Registered users appear here.',
       failed: 'Search failed',
-      startFailed: 'Could not start chat'
+      startFailed: 'Could not start chat',
+      block: 'Block',
+      blocked: 'Blocked',
+      blockFailed: 'Could not block user'
     },
     profile: {
       title: 'Profile',
@@ -131,6 +134,13 @@ export const messages = {
         confirm: 'Delete account',
         cancel: 'Cancel',
         failed: 'Could not delete account'
+      },
+      blocked: {
+        title: 'Blocked users',
+        empty: 'No blocked users',
+        unblock: 'Unblock',
+        loadFailed: 'Could not load blocked users',
+        unblockFailed: 'Could not unblock user'
       }
     },
     chat: {
@@ -189,7 +199,16 @@ export const messages = {
       exportReady: 'Export ready',
       exportFailed: 'Export failed',
       openLink: 'Open link',
-      realtimeUnavailable: 'Realtime connection is not ready. Wait a moment and try again.'
+      realtimeUnavailable: 'Realtime connection is not ready. Wait a moment and try again.',
+      disappearingTitle: 'Disappearing messages',
+      disappearingOff: 'Off',
+      disappearing1m: '1 minute',
+      disappearing1h: '1 hour',
+      disappearing1d: '1 day',
+      disappearing7d: '7 days',
+      disappearingUpdateFailed: 'Could not update disappearing setting',
+      disappearingLeft: '{time} left',
+      disappearingExpired: 'Expired'
     },
     groups: {
       newTitle: 'New group',
@@ -208,6 +227,26 @@ export const messages = {
       changeAvatar: 'Change group avatar',
       avatarUploadFailed: 'Group avatar upload failed: {error}',
       avatarTypeFailed: 'Group avatar upload failed: choose a JPG, PNG, WebP, or GIF image.',
+      inviteTitle: 'Invite link',
+      inviteUrlLabel: 'Invite link',
+      copyInvite: 'Copy invite link',
+      inviteCopied: 'Copied',
+      inviteFailed: 'Could not create invite link',
+      inviteRevoke: 'Revoke invite link',
+      inviteRevokeFailed: 'Could not revoke invite link',
+      inviteRevoked: 'Invite link revoked'
+    },
+    invite: {
+      title: 'Join chat',
+      loading: 'Loading invite…',
+      participants: '{count} participants',
+      join: 'Join chat',
+      joining: 'Joining…',
+      openChat: 'Open chat',
+      alreadyMember: 'You are already a member of this chat',
+      invalid: 'This invite is invalid or expired',
+      loadFailed: 'Could not load invite',
+      joinFailed: 'Could not join chat'
     },
     messageSearch: {
       title: 'Search messages',
@@ -274,7 +313,11 @@ export const messages = {
         unsupportedAvatarType: 'This avatar image type is not supported',
         avatarTypeMismatch: 'The avatar extension does not match its type',
         avatarContentMismatch: 'The avatar content does not match its file type',
-        avatarTooLarge: 'The avatar image is too large'
+        avatarTooLarge: 'The avatar image is too large',
+        selfBlock: 'You cannot block yourself',
+        invalidInvite: 'This invite is invalid or expired',
+        groupOnlyInvite: 'Only group chats can be invited',
+        invalidDisappearing: 'Disappearing interval must be within 30 days'
       }
     },
     app: {
@@ -368,9 +411,12 @@ export const messages = {
       title: 'Пошук користувачів',
       placeholder: 'Ім’я користувача, ім’я для відображення або електронна пошта',
       emptyTitle: 'Знайдіть людей',
-      emptyText: 'Тут з’являтимуться зареєстровані користувачі.',
+      emptyText: 'Тут з’являтимуться зарестровані користувачі.',
       failed: 'Пошук не вдався',
-      startFailed: 'Не вдалося розпочати чат'
+      startFailed: 'Не вдалося розпочати чат',
+      block: 'Заблокувати',
+      blocked: 'Заблоковано',
+      blockFailed: 'Не вдалося заблокувати користувача'
     },
     profile: {
       title: 'Профіль',
@@ -413,6 +459,13 @@ export const messages = {
         confirm: 'Видалити обліковий запис',
         cancel: 'Скасувати',
         failed: 'Не вдалося видалити обліковий запис'
+      },
+      blocked: {
+        title: 'Заблоковані користувачі',
+        empty: 'Немає заблокованих користувачів',
+        unblock: 'Розблокувати',
+        loadFailed: 'Не вдалося завантажити заблокованих користувачів',
+        unblockFailed: 'Не вдалося розблокувати користувача'
       }
     },
     chat: {
@@ -471,7 +524,16 @@ export const messages = {
       exportReady: 'Експорт готовий',
       exportFailed: 'Експорт не вдався',
       openLink: 'Відкрити посилання',
-      realtimeUnavailable: 'З\u2019єднання в реальному часі ще не готове. Зачекайте трохи та спробуйте ще раз.'
+      realtimeUnavailable: 'З\u2019єднання в реальному часі ще не готове. Зачекайте трохи та спробуйте ще раз.',
+      disappearingTitle: 'Повідомлення, що зникають',
+      disappearingOff: 'Вимкнено',
+      disappearing1m: '1 хвилина',
+      disappearing1h: '1 година',
+      disappearing1d: '1 день',
+      disappearing7d: '7 днів',
+      disappearingUpdateFailed: 'Не вдалося оновити налаштування зникнення',
+      disappearingLeft: 'залишилося {time}',
+      disappearingExpired: 'Закінчився термін'
     },
     groups: {
       newTitle: 'Нова група',
@@ -490,6 +552,26 @@ export const messages = {
       changeAvatar: 'Змінити аватар групи',
       avatarUploadFailed: 'Не вдалося завантажити аватар групи: {error}',
       avatarTypeFailed: 'Не вдалося завантажити аватар групи: виберіть зображення JPG, PNG, WebP або GIF.',
+      inviteTitle: 'Посилання-запрошення',
+      inviteUrlLabel: 'Посилання-запрошення',
+      copyInvite: 'Скопіювати посилання',
+      inviteCopied: 'Скопійовано',
+      inviteFailed: 'Не вдалося створити посилання-запрошення',
+      inviteRevoke: 'Відкликати посилання',
+      inviteRevokeFailed: 'Не вдалося відкликати посилання',
+      inviteRevoked: 'Посилання відкликано'
+    },
+    invite: {
+      title: 'Приєднатися до чату',
+      loading: 'Завантаження запрошення…',
+      participants: '{count} учасників',
+      join: 'Приєднатися до чату',
+      joining: 'Приєднання…',
+      openChat: 'Відкрити чат',
+      alreadyMember: 'Ви вже є учасником цього чату',
+      invalid: 'Це запрошення недійсне або застаріло',
+      loadFailed: 'Не вдалося завантажити запрошення',
+      joinFailed: 'Не вдалося приєднатися до чату'
     },
     messageSearch: {
       title: 'Пошук повідомлень',
@@ -556,7 +638,11 @@ export const messages = {
         unsupportedAvatarType: 'Цей тип зображення аватара не підтримується',
         avatarTypeMismatch: 'Розширення аватара не відповідає його типу',
         avatarContentMismatch: 'Вміст аватара не відповідає типу файлу',
-        avatarTooLarge: 'Зображення аватара завелике'
+        avatarTooLarge: 'Зображення аватара завелике',
+        selfBlock: 'Не можна заблокувати себе',
+        invalidInvite: 'Це запрошення недійсне або застаріло',
+        groupOnlyInvite: 'Лише групові чати можна запрошувати',
+        invalidDisappearing: 'Інтервал зникнення має становити не більше 30 днів'
       }
     },
     app: {

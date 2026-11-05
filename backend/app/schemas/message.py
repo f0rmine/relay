@@ -62,6 +62,7 @@ class MessageOut(OrmModel):
     scheduled_at: datetime | None = None
     mentions: list[str] = Field(default_factory=list)
     link_preview: dict | None = None
+    expires_at: datetime | None = None
 
 
 class MessageEdit(BaseModel):

@@ -13,8 +13,10 @@ from app.core.config import get_settings
 from app.core.redis import get_redis
 from app.core.security import verify_avatar_url
 from app.models.user import User
+from app.models.user_block import UserBlock
 from app.schemas.auth import AccountDeleteRequest
 from app.schemas.user import ProfileUpdate, UserPublic, UserSearchResult
+from app.services.blocks import list_blocked
 from app.services.presence import online_map
 from app.services.users import delete_user_account, save_avatar, search_users
 
@@ -97,6 +99,64 @@ async def get_avatar(filename: str, exp: int, sig: str) -> FileResponse:
         media_type=media_type or "application/octet-stream",
         headers={"Cache-Control": f"private, max-age={max_age}"},
     )
+
+
+@router.post("/{user_id}/block", status_code=status.HTTP_204_NO_CONTENT)
+async def block_user(user_id: str, current_user: CurrentUser, db: DbSession) -> Response:
+    if user_id == current_user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot block yourself")
+    target = await db.get(User, user_id)
+    if target is None or getattr(target, "deleted_at", None) is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    existing = (
+        await db.scalars(
+            select(UserBlock.id).where(
+                UserBlock.blocker_id == current_user.id,
+                UserBlock.blocked_id == user_id,
+            )
+        )
+    ).first()
+    if existing is None:
+        db.add(UserBlock(blocker_id=current_user.id, blocked_id=user_id))
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{user_id}/block", status_code=status.HTTP_204_NO_CONTENT)
+async def unblock_user(user_id: str, current_user: CurrentUser, db: DbSession) -> Response:
+    row = (
+        await db.scalars(
+            select(UserBlock).where(
+                UserBlock.blocker_id == current_user.id,
+                UserBlock.blocked_id == user_id,
+            )
+        )
+    ).first()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/blocked", response_model=list[UserSearchResult])
+async def get_blocked(current_user: CurrentUser, db: DbSession) -> list[UserSearchResult]:
+    blocked = await list_blocked(db, current_user.id)
+    redis = await get_redis()
+    online = await online_map(redis, [user.id for user in blocked])
+    return [
+        UserSearchResult(
+            id=user.id,
+            username=user.username,
+            display_name=user.display_name,
+            avatar_url=user.avatar_url,
+            last_seen_at=user.last_seen_at,
+            is_online=online.get(user.id, False),
+        )
+        for user in blocked
+    ]
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)

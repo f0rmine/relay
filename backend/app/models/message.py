@@ -57,6 +57,9 @@ class Message(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     mentions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     conversation = relationship(
         "Conversation", back_populates="messages", foreign_keys=[conversation_id]

@@ -49,7 +49,11 @@ async def get_or_create_private_conversation(
     if current_user_id == participant_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot create conversation with yourself")
     other = await db.get(User, participant_id)
-    if other is None:
+    if other is None or getattr(other, "deleted_at", None) is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    from app.services.blocks import is_blocked
+
+    if await is_blocked(db, current_user_id, participant_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     key = private_key_for(current_user_id, participant_id)
     conversation = await get_private_conversation_by_key(db, key)
@@ -97,6 +101,7 @@ async def latest_message(db: AsyncSession, conversation_id: str) -> Message | No
             .where(
                 Message.conversation_id == conversation_id,
                 or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+                or_(Message.expires_at.is_(None), Message.expires_at > now),
             )
             .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
@@ -123,6 +128,7 @@ async def latest_messages(
         .where(
             Message.conversation_id.in_(conversation_ids),
             or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+            or_(Message.expires_at.is_(None), Message.expires_at > now),
         )
         .subquery()
     )
@@ -153,6 +159,7 @@ async def unread_count(db: AsyncSession, conversation_id: str, user_id: str) -> 
         Message.sender_id != user_id,
         Message.deleted_at.is_(None),
         or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+        or_(Message.expires_at.is_(None), Message.expires_at > now),
     )
     if last_read_at is not None:
         stmt = stmt.where(Message.created_at > last_read_at)
@@ -179,6 +186,7 @@ async def unread_counts(
             Message.sender_id != user_id,
             Message.deleted_at.is_(None),
             or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+            or_(Message.expires_at.is_(None), Message.expires_at > now),
             or_(
                 ConversationParticipant.last_read_at.is_(None),
                 Message.created_at > ConversationParticipant.last_read_at,
@@ -225,6 +233,7 @@ async def first_unread_ids(
             Message.sender_id != user_id,
             Message.deleted_at.is_(None),
             or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+            or_(Message.expires_at.is_(None), Message.expires_at > now),
             or_(
                 ConversationParticipant.last_read_at.is_(None),
                 Message.created_at > ConversationParticipant.last_read_at,
@@ -260,6 +269,7 @@ async def mark_conversation_read(db: AsyncSession, conversation_id: str, user_id
         Message.deleted_at.is_(None),
         Message.created_at <= now,
         or_(Message.scheduled_at.is_(None), Message.scheduled_at <= now),
+        or_(Message.expires_at.is_(None), Message.expires_at > now),
     )
     if previous_last_read_at is not None:
         unread_query = unread_query.where(Message.created_at > previous_last_read_at)

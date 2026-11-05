@@ -63,6 +63,7 @@
       </div>
       <div class="time">
         {{ d(new Date(message.created_at), 'time') }}
+        <span v-if="expiresLabel" class="expires">⏳ {{ expiresLabel }}</span>
         <span v-if="isScheduled" class="scheduled">🕐 {{ t('chat.scheduled') }}</span>
         <span v-if="message.edited_at" class="edited">{{ t('chat.edited') }}</span>
         <span v-if="message.delivery_state === 'queued'">{{ t('chat.queued') }}</span>
@@ -138,6 +139,27 @@ const isScheduled = computed(() => {
   if (!props.message.scheduled_at) return false;
   const ts = new Date(props.message.scheduled_at).getTime();
   return Number.isFinite(ts) && ts > Date.now();
+});
+const expiresLabel = computed(() => {
+  if (!props.message.expires_at) return null;
+  const target = new Date(props.message.expires_at).getTime();
+  if (!Number.isFinite(target)) return null;
+  const remainingMs = target - Date.now();
+  if (remainingMs <= 0) return t('chat.disappearingExpired');
+  const seconds = Math.floor(remainingMs / 1000);
+  if (seconds < 60) return t('chat.disappearingLeft', { time: `${seconds}s` });
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    return t('chat.disappearingLeft', { time: `${minutes}m` });
+  }
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return t('chat.disappearingLeft', { time: minutes ? `${hours}h ${minutes}m` : `${hours}h` });
+  }
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  return t('chat.disappearingLeft', { time: hours ? `${days}d ${hours}h` : `${days}d` });
 });
 const mentionedMe = computed(() =>
   Boolean(props.currentUserId && (props.message.mentions || []).includes(props.currentUserId))
@@ -448,6 +470,10 @@ em {
   font-style: italic;
 }
 .scheduled {
+  margin-right: 4px;
+  color: var(--relay-muted);
+}
+.expires {
   margin-right: 4px;
   color: var(--relay-muted);
 }

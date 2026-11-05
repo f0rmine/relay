@@ -13,6 +13,7 @@ from app.api.routes import (
     conversations,
     devices,
     exports,
+    invites,
     link_previews,
     messages,
     search,
@@ -27,7 +28,7 @@ from app.core.redis import close_redis, get_redis, ping_redis
 from app.models.user import User
 from app.services.attachments import cleanup_orphan_attachments
 from app.services.exports import cleanup_old_exports, export_worker
-from app.services.messages import scheduled_dispatcher
+from app.services.messages import disappearing_sweeper, scheduled_dispatcher
 from app.services.presence import sweep_expired_presence
 from app.services.push import drain_push_tasks, push_queue_worker
 from app.websocket.manager import manager
@@ -65,6 +66,8 @@ async def lifespan(app: FastAPI):
     app.state.attachment_gc_task = gc_task
     scheduled_task = asyncio.create_task(scheduled_dispatcher())
     app.state.scheduled_task = scheduled_task
+    disappearing_task = asyncio.create_task(disappearing_sweeper())
+    app.state.disappearing_task = disappearing_task
     export_task = asyncio.create_task(export_worker())
     app.state.export_task = export_task
     try:
@@ -85,6 +88,9 @@ async def lifespan(app: FastAPI):
         scheduled_task.cancel()
         with suppress(asyncio.CancelledError):
             await scheduled_task
+        disappearing_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await disappearing_task
         export_task.cancel()
         with suppress(asyncio.CancelledError):
             await export_task
@@ -168,7 +174,7 @@ if settings.sentry_dsn:
 
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.7.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.8.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -190,6 +196,8 @@ app.include_router(attachments.router)
 app.include_router(devices.router)
 app.include_router(link_previews.router)
 app.include_router(exports.router)
+app.include_router(invites.router)
+app.include_router(invites.conversations_router)
 app.include_router(websocket_router)
 
 MAX_JSON_BODY_BYTES = 1_048_576

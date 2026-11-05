@@ -19,7 +19,7 @@
       <ion-button v-if="conversation" @click="goMedia" :aria-label="t('chat.mediaGallery')">
         <ion-icon :icon="imagesOutline" />
       </ion-button>
-      <ion-button v-if="group" @click="goInfo" :aria-label="t('groups.info')">
+      <ion-button v-if="conversation" @click="goInfo" :aria-label="t('groups.info')">
         <ion-icon :icon="informationCircleOutline" />
       </ion-button>
     </ion-buttons>
@@ -59,7 +59,7 @@ function goMedia() {
   if (props.conversation) void router.push(`/chat/${props.conversation.id}/media`);
 }
 function openInfo() {
-  if (group.value) goInfo();
+  if (props.conversation) goInfo();
 }
 </script>
 

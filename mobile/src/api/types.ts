@@ -53,6 +53,7 @@ export interface Message {
   scheduled_at?: string | null;
   mentions?: string[];
   link_preview?: LinkPreview | null;
+  expires_at?: string | null;
 }
 
 export interface Conversation {
@@ -64,6 +65,7 @@ export interface Conversation {
   is_admin?: boolean;
   admin_ids?: string[];
   pinned_message_id?: string | null;
+  disappearing_after_seconds?: number | null;
   participants: User[];
   latest_message?: Message | null;
   unread_count: number;
@@ -99,4 +101,16 @@ export interface TotpSetupResponse {
 
 export interface TwoFactorEnableResponse {
   recovery_codes: string[];
+}
+
+export interface InvitePreview {
+  conversation_id: string;
+  title?: string | null;
+  participant_count: number;
+  is_member: boolean;
+}
+
+export interface InviteCreateResult {
+  invite_url: string;
+  token: string;
 }

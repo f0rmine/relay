@@ -28,8 +28,11 @@ AVATAR_URL_PREFIX = "/uploads/avatars/"
 
 
 async def search_users(db: AsyncSession, q: str, current_user_id: str, limit: int = 20) -> list[User]:
+    from app.services.blocks import blocked_ids_union
+
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     term = f"%{escaped.lower()}%"
+    excluded = await blocked_ids_union(db, current_user_id)
     stmt = (
         select(User)
         .where(User.id != current_user_id)
@@ -43,6 +46,8 @@ async def search_users(db: AsyncSession, q: str, current_user_id: str, limit: in
         .order_by(User.username.asc())
         .limit(limit)
     )
+    if excluded:
+        stmt = stmt.where(~User.id.in_(excluded))
     return list((await db.scalars(stmt)).all())
 
 

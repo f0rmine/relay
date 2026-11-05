@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -13,6 +13,7 @@ from app.schemas.conversation import (
     ConversationCreate,
     ConversationDetail,
     ConversationOut,
+    DisappearingUpdate,
     GroupCreate,
     GroupUpdate,
     ParticipantIdsRequest,
@@ -79,6 +80,9 @@ async def serialize_conversations(
                 kind=conversation.kind,
                 title=conversation.title if conversation.kind == "group" else None,
                 avatar_url=conversation.avatar_url if conversation.kind == "group" else None,
+                disappearing_after_seconds=getattr(
+                    conversation, "disappearing_after_seconds", None
+                ),
                 is_admin=any(
                     participant.user_id == current_user_id and participant.is_admin
                     for participant in conversation.participants
@@ -256,6 +260,37 @@ async def leave_group(conversation_id: str, current_user: CurrentUser, db: DbSes
         "conversation:updated-info",
         serialize_conversation_dict(serialized),
     )
+
+
+@router.patch("/{conversation_id}/disappearing", response_model=ConversationDetail)
+async def set_disappearing(
+    conversation_id: str,
+    payload: DisappearingUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ConversationDetail:
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    seconds = payload.seconds
+    if seconds is not None:
+        if seconds == 0:
+            seconds = None
+        elif not (1 <= seconds <= 30 * 24 * 3600):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Disappearing interval must be within 30 days"
+            )
+    conversation.disappearing_after_seconds = seconds
+    conversation.updated_at = datetime.now(UTC)
+    await db.commit()
+    conversation = await require_participant(db, conversation_id, current_user.id)
+    serialized = await serialize_conversation(db, conversation, current_user.id)
+    redis = await get_redis()
+    await manager.broadcast_to_users(
+        redis,
+        await conversation_participant_ids(conversation),
+        "conversation:updated-info",
+        serialize_conversation_dict(serialized),
+    )
+    return ConversationDetail.model_validate(serialized.model_dump())
 
 
 @router.put("/{conversation_id}/pin/{message_id}", response_model=ConversationDetail)

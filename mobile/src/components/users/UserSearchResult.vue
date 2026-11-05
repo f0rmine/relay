@@ -6,15 +6,27 @@
       <p>@{{ user.username }}</p>
     </ion-label>
     <OnlineStatusBadge :online="user.is_online" :last-seen="user.last_seen_at" />
+    <ion-button
+      v-if="showBlock"
+      slot="end"
+      fill="clear"
+      color="danger"
+      size="small"
+      @click.stop="$emit('block', user)"
+    >
+      {{ t('search.block') }}
+    </ion-button>
   </ion-item>
 </template>
 
 <script setup lang="ts">
-import { IonItem, IonLabel } from '@ionic/vue';
+import { IonButton, IonItem, IonLabel } from '@ionic/vue';
+import { useI18n } from 'vue-i18n';
 import type { User } from '@/api/types';
 import Avatar from './Avatar.vue';
 import OnlineStatusBadge from './OnlineStatusBadge.vue';
 
-defineProps<{ user: User }>();
-defineEmits<{ select: [user: User] }>();
+defineProps<{ user: User; showBlock?: boolean }>();
+defineEmits<{ select: [user: User]; block: [user: User] }>();
+const { t } = useI18n();
 </script>
