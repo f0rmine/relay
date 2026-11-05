@@ -16,7 +16,7 @@ from app.core.config import get_settings
 settings = get_settings()
 password_hasher = PasswordHasher()
 
-TokenType = Literal["access", "refresh", "password_reset"]
+TokenType = Literal["access", "refresh", "password_reset", "2fa"]
 
 
 def hash_password(password: str) -> str:

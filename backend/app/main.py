@@ -105,15 +105,17 @@ async def presence_sweeper(redis) -> None:
             now = datetime.now(UTC)
             peers: set[str] = set()
             async with AsyncSessionLocal() as db:
+                live_expired: list[str] = []
                 for user_id in expired:
                     user = await db.get(User, user_id)
-                    if user is not None:
+                    if user is not None and getattr(user, "deleted_at", None) is None:
                         user.last_seen_at = now
+                        live_expired.append(user_id)
                 await db.commit()
-                for user_id in expired:
+                for user_id in live_expired:
                     peers.update(await participant_ids_for_user(db, user_id))
             if peers:
-                for user_id in expired:
+                for user_id in live_expired:
                     await manager.broadcast_to_users(
                         redis,
                         list(peers),
@@ -149,9 +151,24 @@ async def orphan_attachment_gc() -> None:
 
 settings = get_settings()
 get_encryption_keyring()
+
+if settings.sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            send_default_pii=False,
+            traces_sample_rate=0.1,
+            integrations=[FastApiIntegration()],
+        )
+    except Exception:
+        logger.warning("Sentry initialization failed", exc_info=True)
+
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.6.3", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.7.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

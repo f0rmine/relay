@@ -98,6 +98,7 @@ async def download_attachment(
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(attachment.original_filename)}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(len(content)),
+        "Cache-Control": "private, max-age=3600",
     }
     range_header = request.headers.get("range")
     if range_header:

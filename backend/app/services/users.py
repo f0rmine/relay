@@ -9,7 +9,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.models.auth import PasswordResetToken, RefreshToken
+from app.models.device import DeviceToken
 from app.models.user import User
+from app.models.user_device import UserDevice
 from app.services.attachments import sniff_image_type
 from app.services.uploads import read_upload_limited
 
@@ -30,6 +33,7 @@ async def search_users(db: AsyncSession, q: str, current_user_id: str, limit: in
     stmt = (
         select(User)
         .where(User.id != current_user_id)
+        .where(User.deleted_at.is_(None))
         .where(
             or_(
                 User.username.ilike(term, escape="\\"),
@@ -109,4 +113,81 @@ async def save_avatar(db: AsyncSession, user: User, file: UploadFile) -> User:
 
     remove_previous_avatar_file(previous_avatar_url, keep_path=path)
     await db.refresh(user)
+    return user
+
+
+async def delete_user_account(db: AsyncSession, user: User) -> User:
+    """Soft-tombstone the account while retaining messages for chat integrity."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import delete
+
+    from app.models.recovery_code import RecoveryCode
+    from app.services.auth import revoke_all_access_tokens
+
+    now = datetime.now(UTC)
+    suffix = f"_del_{uuid4().hex[:8]}"
+    old_username = user.username or "user"
+    old_email = user.email or "user@example.com"
+    avatar_url = user.avatar_url
+
+    user.deleted_at = now
+    user.username = (old_username[: 32 - len(suffix)] + suffix)[:32]
+    user.email = (old_email[: 255 - len(suffix)] + suffix)[:255]
+    user.display_name = "Deleted User"
+    user.avatar_url = None
+    user.totp_secret_ciphertext = None
+    user.totp_enabled = False
+
+    await db.execute(
+        delete(UserDevice).where(UserDevice.user_id == user.id)
+    )
+    await db.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
+
+    refresh_rows = (
+        await db.scalars(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)
+            )
+        )
+    ).all()
+    for row in refresh_rows:
+        row.revoked_at = now
+
+    reset_rows = (
+        await db.scalars(
+            select(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+        )
+    ).all()
+    for row in reset_rows:
+        row.used_at = now
+
+    device_rows = (
+        await db.scalars(select(DeviceToken).where(DeviceToken.user_id == user.id))
+    ).all()
+    for row in device_rows:
+        row.enabled = False
+
+    await db.commit()
+    await db.refresh(user)
+
+    if avatar_url:
+        remove_previous_avatar_file(avatar_url)
+
+    try:
+        await revoke_all_access_tokens(user.id)
+    except Exception:
+        logger.warning("Failed to revoke access tokens on account deletion", exc_info=True)
+
+    try:
+        from app.core.redis import get_redis
+
+        redis = await get_redis()
+        await redis.delete(f"presence:user:{user.id}")
+    except Exception:
+        logger.warning("Failed to clear presence on account deletion", exc_info=True)
+
     return user

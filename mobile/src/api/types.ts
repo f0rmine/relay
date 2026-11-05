@@ -7,6 +7,7 @@ export interface User {
   created_at?: string;
   last_seen_at?: string | null;
   is_online?: boolean;
+  totp_enabled?: boolean;
 }
 
 export interface Attachment {
@@ -84,4 +85,18 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   user: User;
+}
+
+export interface TwoFactorChallenge {
+  requires_2fa: true;
+  challenge_token: string;
+}
+
+export interface TotpSetupResponse {
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface TwoFactorEnableResponse {
+  recovery_codes: string[];
 }

@@ -43,3 +43,5 @@ export function absoluteUrl(path?: string | null): string | undefined {
   if (/^https?:\/\//i.test(path)) return path;
   return apiUrl(path);
 }
+
+export const SENTRY_DSN = (import.meta.env.VITE_SENTRY_DSN || '').trim() || undefined;

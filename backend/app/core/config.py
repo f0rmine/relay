@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     push_notifications_enabled: bool = False
     metrics_enabled: bool = False
     metrics_bearer_token: str | None = None
+    sentry_dsn: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -63,6 +64,7 @@ class Settings(BaseSettings):
         "smtp_password",
         "smtp_from_address",
         "metrics_bearer_token",
+        "sentry_dsn",
         mode="before",
     )
     @classmethod

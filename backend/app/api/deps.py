@@ -33,6 +33,8 @@ async def get_current_user(
     user = await db.get(User, payload["sub"])
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    if getattr(user, "deleted_at", None) is not None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     return user
 
 
@@ -57,5 +59,7 @@ async def get_ws_user_from_token(db: AsyncSession, token: str | None) -> User:
     await ensure_access_token_usable(payload)
     user = await db.get(User, payload["sub"])
     if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    if getattr(user, "deleted_at", None) is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     return user

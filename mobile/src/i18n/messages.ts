@@ -60,6 +60,15 @@ export const messages = {
           length: 'Password must be between 8 and 128 characters.',
           mismatch: 'Passwords do not match.'
         }
+      },
+      twoFactor: {
+        title: 'Two-factor authentication',
+        subtitle: 'Enter the 6-digit code from your authenticator app or a recovery code.',
+        codeLabel: 'Verification code',
+        codeHint: '6-digit code or recovery code',
+        verify: 'Verify',
+        back: 'Back to login',
+        failed: 'Two-factor verification failed'
       }
     },
     conversations: {
@@ -90,7 +99,39 @@ export const messages = {
       updateFailed: 'Profile update failed',
       avatarTypeFailed: 'Avatar upload failed: choose a JPG, PNG, WebP, or GIF image.',
       avatarUploadFailed: 'Avatar upload failed: {error}',
-      unknownError: 'unknown error'
+      unknownError: 'unknown error',
+      twoFactor: {
+        title: 'Two-factor authentication',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        enable: 'Enable 2FA',
+        disable: 'Disable 2FA',
+        setupHint: 'Scan the QR code or enter the secret manually in your authenticator app, then confirm with a 6-digit code.',
+        secretLabel: 'Secret',
+        codeLabel: 'Verification code',
+        enableAction: 'Enable',
+        disableAction: 'Disable',
+        disableHint: 'Enter a 6-digit code or recovery code to disable 2FA.',
+        cancel: 'Cancel',
+        setupFailed: 'Could not start 2FA setup',
+        enableFailed: 'Could not enable 2FA',
+        disableFailed: 'Could not disable 2FA',
+        recoveryTitle: 'Save your recovery codes',
+        recoveryWarning: 'Save these codes in a safe place. Each code can be used only once. They are shown only now.',
+        copy: 'Copy codes',
+        copied: 'Copied',
+        copyFailed: 'Could not copy recovery codes',
+        done: 'Done'
+      },
+      deleteAccount: {
+        title: 'Danger zone',
+        button: 'Delete account',
+        warning: 'This deactivates your account and revokes all sessions. Your messages are retained in chats.',
+        prompt: 'Type DELETE to confirm',
+        confirm: 'Delete account',
+        cancel: 'Cancel',
+        failed: 'Could not delete account'
+      }
     },
     chat: {
       loadOlder: 'Load older',
@@ -301,6 +342,15 @@ export const messages = {
           length: 'Пароль має містити від 8 до 128 символів.',
           mismatch: 'Паролі не збігаються.'
         }
+      },
+      twoFactor: {
+        title: 'Двофакторна автентифікація',
+        subtitle: 'Введіть 6-значний код із застосунку автентифікації або код відновлення.',
+        codeLabel: 'Код підтвердження',
+        codeHint: '6-значний код або код відновлення',
+        verify: 'Підтвердити',
+        back: 'Повернутися до входу',
+        failed: 'Не вдалося підтвердити двофакторну автентифікацію'
       }
     },
     conversations: {
@@ -331,7 +381,39 @@ export const messages = {
       updateFailed: 'Не вдалося оновити профіль',
       avatarTypeFailed: 'Не вдалося завантажити аватар: виберіть зображення JPG, PNG, WebP або GIF.',
       avatarUploadFailed: 'Не вдалося завантажити аватар: {error}',
-      unknownError: 'невідома помилка'
+      unknownError: 'невідома помилка',
+      twoFactor: {
+        title: 'Двофакторна автентифікація',
+        enabled: 'Увімкнено',
+        disabled: 'Вимкнено',
+        enable: 'Увімкнути 2FA',
+        disable: 'Вимкнути 2FA',
+        setupHint: 'Відскануйте QR-код або введіть секрет вручну в застосунку-автентикаторі, потім підтвердіть 6-значним кодом.',
+        secretLabel: 'Секрет',
+        codeLabel: 'Код підтвердження',
+        enableAction: 'Увімкнути',
+        disableAction: 'Вимкнути',
+        disableHint: 'Введіть 6-значний код або код відновлення, щоб вимкнути 2FA.',
+        cancel: 'Скасувати',
+        setupFailed: 'Не вдалося розпочати налаштування 2FA',
+        enableFailed: 'Не вдалося увімкнути 2FA',
+        disableFailed: 'Не вдалося вимкнути 2FA',
+        recoveryTitle: 'Збережіть свої коди відновлення',
+        recoveryWarning: 'Зберігайте ці коди в безпечному місці. Кожен код можна використати лише один раз. Вони показуються тільки зараз.',
+        copy: 'Скопіювати коди',
+        copied: 'Скопійовано',
+        copyFailed: 'Не вдалося скопіювати коди відновлення',
+        done: 'Готово'
+      },
+      deleteAccount: {
+        title: 'Небезпечна зона',
+        button: 'Видалити обліковий запис',
+        warning: 'Це деактивує ваш обліковий запис і відкликає всі сесії. Ваші повідомлення зберігаються в чатах.',
+        prompt: 'Введіть DELETE для підтвердження',
+        confirm: 'Видалити обліковий запис',
+        cancel: 'Скасувати',
+        failed: 'Не вдалося видалити обліковий запис'
+      }
     },
     chat: {
       loadOlder: 'Завантажити попередні',

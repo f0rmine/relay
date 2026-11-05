@@ -41,4 +41,4 @@ RUN chmod 0755 /usr/local/bin/relay-entrypoint \
 
 EXPOSE 8000
 ENTRYPOINT ["relay-entrypoint"]
-CMD uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 1048576 --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+CMD uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 1048576 --ws-per-message-deflate --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"

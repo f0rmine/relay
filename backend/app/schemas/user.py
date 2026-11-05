@@ -15,6 +15,7 @@ class UserPublic(OrmModel):
     created_at: datetime
     last_seen_at: datetime | None = None
     is_online: bool = False
+    totp_enabled: bool = False
 
     @field_validator("avatar_url", mode="after")
     @classmethod
