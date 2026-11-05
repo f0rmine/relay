@@ -57,6 +57,13 @@ async def serialize_conversations(
         for participant in conversation.participants
     }
     online = await online_map(redis, list(users_by_id))
+    # Deleted accounts are never reported as online.
+    deleted_ids = {
+        user_id for user_id, user in users_by_id.items()
+        if getattr(user, "deleted_at", None) is not None
+    }
+    for user_id in deleted_ids:
+        online[user_id] = False
     latest_by_conversation = await latest_messages(db, conversation_ids)
     unread_by_conversation = await unread_counts(db, conversation_ids, current_user_id)
     first_unread_by_conversation = await first_unread_ids(db, conversation_ids, current_user_id)

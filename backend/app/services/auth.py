@@ -88,6 +88,8 @@ async def authenticate_user(db: AsyncSession, login: str, password: str) -> User
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     if not verify_password(password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
+    if getattr(user, "deleted_at", None) is not None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     return user
 
 

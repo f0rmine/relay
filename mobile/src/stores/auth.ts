@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ApiError, apiFetch, markAuthCleared } from '@/api/client';
-import type { TokenResponse, User } from '@/api/types';
+import type { TokenResponse, TwoFactorChallenge, User } from '@/api/types';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
@@ -102,18 +102,40 @@ export const useAuthStore = defineStore('auth', {
       });
       return restorePromise;
     },
-  async login(login: string, password: string) {
+  async login(login: string, password: string): Promise<TokenResponse | TwoFactorChallenge> {
     this.loading = true;
     try {
-      const response = await apiFetch<TokenResponse>('/auth/login', {
+      const response = await apiFetch<TokenResponse | TwoFactorChallenge>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ login, password }),
         skipAuthRefresh: true
       });
+      if ('requires_2fa' in response && response.requires_2fa) {
+        return response;
+      }
+      const tokens = response as TokenResponse;
+      await this.persist(tokens);
+      await useMessagesStore().restoreLocal(tokens.user.id);
+      void useSocketStore().connect();
+      void initPushNotifications();
+      return tokens;
+    } finally {
+      this.loading = false;
+    }
+    },
+    async verifyTwoFactor(challengeToken: string, code: string): Promise<TokenResponse> {
+      this.loading = true;
+      try {
+        const response = await apiFetch<TokenResponse>('/auth/login/verify', {
+          method: 'POST',
+          body: JSON.stringify({ challenge_token: challengeToken, code }),
+          skipAuthRefresh: true
+        });
         await this.persist(response);
         await useMessagesStore().restoreLocal(response.user.id);
         void useSocketStore().connect();
         void initPushNotifications();
+        return response;
       } finally {
         this.loading = false;
       }

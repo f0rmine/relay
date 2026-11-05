@@ -5,6 +5,7 @@ from app.models.device import DeviceToken
 from app.models.export_job import ExportJob
 from app.models.link_preview import LinkPreview
 from app.models.message import Message, MessageReaction, MessageRead
+from app.models.recovery_code import RecoveryCode
 from app.models.user import User
 from app.models.user_device import UserDevice
 
@@ -19,6 +20,7 @@ __all__ = [
     "MessageReaction",
     "MessageRead",
     "PasswordResetToken",
+    "RecoveryCode",
     "RefreshToken",
     "User",
     "UserDevice",

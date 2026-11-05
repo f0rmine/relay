@@ -122,6 +122,12 @@ def install_observability(app: FastAPI) -> None:
         started = perf_counter()
         status_code = 500
         try:
+            try:
+                import sentry_sdk
+
+                sentry_sdk.scope.set_tag("request_id", request_id)
+            except Exception:
+                logger.debug("Sentry tag skipped", exc_info=True)
             response = await call_next(request)
             status_code = response.status_code
             response.headers[REQUEST_ID_HEADER] = request_id
