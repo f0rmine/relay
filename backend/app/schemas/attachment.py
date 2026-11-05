@@ -11,4 +11,7 @@ class AttachmentOut(OrmModel):
     mime_type: str
     file_size: int
     public_url: str
+    thumb_w: int | None = None
+    thumb_h: int | None = None
+    thumb_size: int | None = None
     created_at: datetime

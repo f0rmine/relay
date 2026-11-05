@@ -29,3 +29,10 @@ mobile/android/app/google-services.json
 
 # Temporary scripts
 backend/app/scripts_delete_dummy.py
+
+# Local notes & agent tooling
+TODO.md
+opencode.txt
+AGENTS.md
+.agents/
+.codegraph/

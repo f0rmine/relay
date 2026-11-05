@@ -30,6 +30,10 @@ ALLOWED_MIME_TYPES = {
     "image/png",
     "image/webp",
     "image/gif",
+    "audio/mp4",
+    "audio/webm",
+    "audio/ogg",
+    "audio/mpeg",
     "application/pdf",
     "text/plain",
     "application/msword",
@@ -41,6 +45,10 @@ ALLOWED_EXTENSIONS_BY_MIME_TYPE = {
     "image/png": {".png"},
     "image/webp": {".webp"},
     "image/gif": {".gif"},
+    "audio/mp4": {".m4a", ".mp4"},
+    "audio/webm": {".webm"},
+    "audio/ogg": {".ogg"},
+    "audio/mpeg": {".mp3"},
     "application/pdf": {".pdf"},
     "text/plain": {".txt"},
     "application/msword": {".doc"},
@@ -172,6 +180,9 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
         attachment.thumb_size = len(thumb_bytes)
         attachment.thumb_w = thumb_w
         attachment.thumb_h = thumb_h
+        attachment.thumb_nonce = encrypted_thumb.nonce
+        attachment.thumb_key_id = encrypted_thumb.key_id
+        attachment.thumb_version = encrypted_thumb.version
     try:
         async with aiofiles.open(path, "wb") as out:
             await out.write(encrypted_data.ciphertext)
@@ -203,17 +214,31 @@ async def read_attachment_bytes(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
     async with aiofiles.open(path, "rb") as stored_file:
         stored_data = await stored_file.read()
+    if use_thumb:
+        encryption_metadata = (
+            attachment.thumb_nonce,
+            attachment.thumb_key_id,
+            attachment.thumb_version,
+            attachment.thumb_path,
+        )
+        aad = attachment_thumb_associated_data(attachment.id)
+        if any(value is None for value in encryption_metadata):
+            raise DecryptionError("Encrypted thumbnail metadata is incomplete")
+        if attachment.thumb_version != ENCRYPTION_VERSION:
+            raise DecryptionError("Unsupported thumbnail encryption version")
+        return get_encryption_keyring().decrypt(
+            stored_data,
+            attachment.thumb_nonce,  # type: ignore[arg-type]
+            attachment.thumb_key_id,  # type: ignore[arg-type]
+            associated_data=aad,
+        )
     encryption_metadata = (
         attachment.encryption_nonce,
         attachment.encryption_key_id,
         attachment.encryption_version,
         attachment.encrypted_path,
     )
-    aad = (
-        attachment_thumb_associated_data(attachment.id)
-        if use_thumb
-        else attachment_associated_data(attachment.id)
-    )
+    aad = attachment_associated_data(attachment.id)
     if all(value is None for value in encryption_metadata):
         return stored_data
     if any(value is None for value in encryption_metadata):
@@ -222,8 +247,8 @@ async def read_attachment_bytes(
         raise DecryptionError("Unsupported attachment encryption version")
     return get_encryption_keyring().decrypt(
         stored_data,
-        attachment.encryption_nonce,
-        attachment.encryption_key_id,
+        attachment.encryption_nonce,  # type: ignore[arg-type]
+        attachment.encryption_key_id,  # type: ignore[arg-type]
         associated_data=aad,
     )
 

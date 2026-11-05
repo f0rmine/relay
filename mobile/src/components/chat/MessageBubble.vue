@@ -222,8 +222,8 @@ watch(
   opacity: 1;
 }
 .bubble.deleted {
-  background: rgba(78, 96, 116, 0.82);
-  color: #ffffff;
+  background: var(--relay-border);
+  color: var(--ion-text-color);
 }
 .bubble.highlighted {
   animation: flash-highlight 1.5s ease-out;
@@ -244,7 +244,7 @@ watch(
   margin-bottom: 4px;
   padding: 4px 8px;
   border-left: 3px solid var(--ion-color-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--relay-border);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -271,7 +271,7 @@ watch(
   border: none;
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--relay-border);
   color: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -288,7 +288,7 @@ p {
   font-style: italic;
 }
 em {
-  color: #ffffff;
+  color: var(--ion-text-color);
   font-style: normal;
   font-weight: 500;
 }
@@ -304,32 +304,32 @@ em {
   height: 18px;
   place-items: center;
   border-radius: 999px;
-  background: rgba(244, 248, 251, 0.18);
-  color: #ffffff;
+  background: var(--relay-border);
+  color: var(--ion-text-color);
   font-size: 16px;
   line-height: 1;
 }
 :global(.relay-message-actions) {
-  --background: #17212b;
-  --color: #ffffff;
-  --button-color: #ffffff;
-  --button-background: #17212b;
-  --button-background-hover: #223246;
-  --button-background-activated: #223246;
+  --background: var(--relay-panel);
+  --color: var(--ion-text-color);
+  --button-color: var(--ion-text-color);
+  --button-background: var(--relay-panel);
+  --button-background-hover: var(--relay-border);
+  --button-background-activated: var(--relay-border);
 }
 :global(.relay-message-actions .action-sheet-title),
 :global(.relay-message-actions .action-sheet-button),
 :global(.relay-message-actions .action-sheet-button-inner) {
-  color: #ffffff !important;
+  color: var(--ion-text-color) !important;
 }
 :global(.relay-message-actions .action-sheet-destructive) {
-  color: #ffffff !important;
+  color: #e66b6b !important;
 }
 .time {
   margin-top: 4px;
   text-align: right;
   font-size: 11px;
-  color: #b8c8da;
+  color: var(--relay-muted);
 }
 .edited {
   margin-right: 4px;
