@@ -99,7 +99,7 @@ server-side feature needs a client-side replacement in the same release window:
 |---|---|---|
 | Message search | server decrypts and scans | on-device index over the local message store |
 | Thumbnails | server generates from plaintext | sender generates before encrypting; sent inside the envelope |
-| Link previews | server fetches the URL (and learns it) | sender's device fetches, or previews are off for E2EE chats |
+| Link previews | server fetches the URL (and learns it) | off in E2EE chats (see decisions) |
 | Reply quotes | server embeds the quoted text | client resolves from its local store |
 | Chat export | server builds a zip | client builds it from local data |
 | Attachments | server encrypts uploads | client encrypts with a random per-file key; key and digest travel in the message envelope |
@@ -136,8 +136,10 @@ message for the whole transition. Instead:
    passphrase (Argon2id, client-side), independent security review, then E2EE on
    by default.
 
-## 9. Open decisions
+## 9. Decisions
 
-- Encrypted backup: opt-in (privacy-first) or opt-out (fewer users losing history)?
-- Group size ceiling for Sender Keys before considering MLS.
-- Whether link previews are worth the IP leak of sender-side fetching.
+- **Encrypted backup is opt-in.** Default is privacy: nothing leaves the device
+  unless the user turns backup on and sets a recovery passphrase.
+- **Link previews are off in E2EE conversations.** Sender-side fetching would leak
+  the sender's IP address to the linked site; server-side fetching would leak the URL.
+- Open: group size ceiling for Sender Keys before considering MLS.
