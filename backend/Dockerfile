@@ -11,7 +11,7 @@ RUN apt-get update \
 
 WORKDIR /build
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-cache-dir --no-deps .

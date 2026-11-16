@@ -11,7 +11,8 @@ if ! .venv/bin/python -c 'from importlib.metadata import version; raise SystemEx
   .venv/bin/python -m pip install --upgrade "pip>=26.1.2"
 fi
 if ! .venv/bin/python -c "import bandit, pip_audit" >/dev/null 2>&1; then
-  .venv/bin/pip install -e ".[dev]"
+  .venv/bin/pip install --require-hashes -r requirements-dev.txt
+  .venv/bin/pip install --no-deps -e .
 fi
 
 .venv/bin/pip-audit
