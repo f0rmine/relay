@@ -21,6 +21,14 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@aparajita/capacitor-secure-storage"
         update-types: ["version-update:semver-major"]
+      # Ionic 9 requires Capacitor 7+; upgrade together with that migration.
+      - dependency-name: "@ionic/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "ionicons"
+        update-types: ["version-update:semver-major"]
+      # Keep Node typings on the runtime major used by CI and local dev (24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /backend
