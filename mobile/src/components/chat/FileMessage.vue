@@ -12,6 +12,7 @@ import { documentAttachOutline } from 'ionicons/icons';
 import { useI18n } from 'vue-i18n';
 import { apiBlob } from '@/api/client';
 import type { Attachment } from '@/api/types';
+import { reportError } from '@/services/errors';
 
 const props = defineProps<{ attachment: Attachment }>();
 const loading = ref(false);
@@ -31,7 +32,8 @@ async function openFile() {
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank', 'noopener,noreferrer');
     window.setTimeout(() => URL.revokeObjectURL(url), 30000);
-  } catch {
+  } catch (err: unknown) {
+    reportError('file.download', err);
     failed.value = true;
   } finally {
     loading.value = false;

@@ -11,6 +11,7 @@ import {
   saveOutboxEntry,
   type OutboxEntry
 } from '@/services/message-storage';
+import { reportError } from '@/services/errors';
 
 interface MessagesState {
   byConversation: Record<string, Message[]>;
@@ -225,7 +226,8 @@ export const useMessagesStore = defineStore('messages', {
       };
       try {
         await saveOutboxEntry(entry);
-      } catch {
+      } catch (error) {
+        reportError('outbox.persist', error);
         // Degrade to memory-only queue when persistence is unavailable.
       }
       this.outbox[id] = entry;

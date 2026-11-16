@@ -125,7 +125,7 @@ def install_observability(app: FastAPI) -> None:
             try:
                 import sentry_sdk
 
-                sentry_sdk.scope.set_tag("request_id", request_id)
+                sentry_sdk.set_tag("request_id", request_id)
             except Exception:
                 logger.debug("Sentry tag skipped", exc_info=True)
             response = await call_next(request)

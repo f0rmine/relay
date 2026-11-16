@@ -152,6 +152,7 @@ import ErrorState from '@/components/ErrorState.vue';
 import UserSearchList from '@/components/users/UserSearchList.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
+import { reportError } from '@/services/errors';
 
 const route = useRoute();
 const router = useRouter();
@@ -408,7 +409,8 @@ async function startExport() {
           exportStatus.value = t('chat.exportFailed');
           exporting.value = false;
         }
-      } catch {
+      } catch (err: unknown) {
+        reportError('export.poll', err);
         stopExportPoll();
         exportStatus.value = t('chat.exportFailed');
         exporting.value = false;

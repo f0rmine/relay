@@ -8,6 +8,7 @@ import type { Conversation, Message } from '@/api/types';
 import { initNotifications, notifyNewMessage } from '@/services/notifications';
 import { activeConversationId } from '@/services/navigation';
 import { translate } from '@/i18n';
+import { reportError } from '@/services/errors';
 
 interface SocketState {
   connected: boolean;
@@ -91,13 +92,17 @@ export const useSocketStore = defineStore('socket', {
       const auth = useAuthStore();
       try {
         await auth.syncFromStorage();
-      } catch {
+      } catch (error) {
+        reportError('socket.syncAuth', error);
         return null;
       }
       let token = auth.accessToken;
       if (!token) return null;
       if (tokenExpiresSoon(token)) {
-        const refreshed = await refreshTokens().catch(() => null);
+        const refreshed = await refreshTokens().catch((error: unknown) => {
+          reportError('socket.refreshTokens', error);
+          return null;
+        });
         token = refreshed?.access_token || null;
       }
       return token;

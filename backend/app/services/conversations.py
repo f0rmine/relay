@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -121,7 +121,7 @@ async def latest_messages(
             func.row_number()
             .over(
                 partition_by=Message.conversation_id,
-                order_by=(desc(Message.created_at), desc(Message.id)),
+                order_by=(Message.created_at.desc(), Message.id.desc()),
             )
             .label("position"),
         )
@@ -217,7 +217,7 @@ async def first_unread_ids(
             func.row_number()
             .over(
                 partition_by=Message.conversation_id,
-                order_by=(asc(Message.created_at), asc(Message.id)),
+                order_by=(Message.created_at.asc(), Message.id.asc()),
             )
             .label("position"),
         )

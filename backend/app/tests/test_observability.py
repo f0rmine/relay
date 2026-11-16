@@ -101,3 +101,15 @@ async def test_metrics_can_be_disabled_and_require_the_bearer_token() -> None:
             )
         ).status_code == 200
     http_metrics.reset()
+
+
+async def test_request_id_is_tagged_in_sentry(monkeypatch) -> None:
+    import sentry_sdk
+
+    tags: list[tuple[str, str]] = []
+    monkeypatch.setattr(sentry_sdk, "set_tag", lambda key, value: tags.append((key, value)))
+    transport = ASGITransport(app=observable_app())
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.get("/items/one", headers={REQUEST_ID_HEADER: "mobile-request-2"})
+
+    assert ("request_id", "mobile-request-2") in tags

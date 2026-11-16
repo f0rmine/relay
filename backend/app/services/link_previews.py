@@ -90,7 +90,7 @@ async def _validate_public_url(url: str) -> bool:
         return False
     for info in infos:
         sockaddr = info[4]
-        candidate = sockaddr[0] if sockaddr else ""
+        candidate = str(sockaddr[0]) if sockaddr else ""
         if _is_blocked_ip(candidate):
             return False
     return True
@@ -103,7 +103,7 @@ class _OgParser(html.parser.HTMLParser):
         self._title_parts: list[str] = []
         self._in_title = False
 
-    def handle_starttag(self, tag: str, attrs: list) -> None:  # type: ignore[override]
+    def handle_starttag(self, tag: str, attrs: list) -> None:
         attr_dict = dict(attrs)
         if tag == "meta":
             key = (attr_dict.get("property") or attr_dict.get("name") or "").lower()

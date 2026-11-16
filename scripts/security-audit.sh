@@ -15,7 +15,9 @@ if ! .venv/bin/python -c "import bandit, pip_audit" >/dev/null 2>&1; then
 fi
 
 .venv/bin/pip-audit
-.venv/bin/bandit -q -r app -x app/tests,app/scripts_delete_dummy.py
+.venv/bin/bandit -q -r app -x app/tests
 
 cd "$ROOT_DIR/mobile"
-npm audit
+# Shipped app dependencies must be clean; build/test tooling fails on high+.
+npm audit --omit=dev
+npm audit --audit-level=high

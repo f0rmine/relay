@@ -174,7 +174,7 @@ if settings.sentry_dsn:
 
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.8.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.8.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
