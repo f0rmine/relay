@@ -138,6 +138,11 @@ async def create_message(
 ) -> Message:
     attachment_ids = attachment_ids or []
     conversation = await require_participant(db, conversation_id, user.id)
+    if conversation.e2ee:
+        # Plaintext (even server-encrypted) must never enter an E2EE conversation.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Encrypted conversations only accept encrypted messages"
+        )
     if conversation.kind == "private":
         from app.services.blocks import is_blocked
 
@@ -327,6 +332,10 @@ async def delete_message_for_everyone(db: AsyncSession, message_id: str, user: U
     await require_participant(db, message.conversation_id, user.id)
     if message.sender_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sender can delete this message")
+    if message.e2ee:
+        from app.services.e2ee_messages import delete_envelopes
+
+        await delete_envelopes(db, message.id)
     now = datetime.now(UTC)
     message.deleted_at = now
     message.updated_at = now
@@ -364,6 +373,10 @@ async def edit_message(db: AsyncSession, message_id: str, user: User, new_text: 
     await require_participant(db, message.conversation_id, user.id)
     if message.sender_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sender can edit this message")
+    if message.e2ee:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Editing encrypted messages is not supported yet"
+        )
     if message.deleted_at is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot edit a deleted message")
     if message.text_ciphertext is None and message.text is None:

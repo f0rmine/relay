@@ -9,6 +9,8 @@ from app.schemas.user import UserSearchResult
 
 class ConversationCreate(BaseModel):
     participant_id: str
+    # Start an end-to-end encrypted chat (separate from any existing legacy chat).
+    e2ee: bool = False
 
 
 class GroupCreate(BaseModel):
@@ -34,6 +36,7 @@ class ConversationOut(BaseModel):
     title: str | None = None
     avatar_url: str | None = None
     disappearing_after_seconds: int | None = None
+    e2ee: bool = False
     is_admin: bool = False
     admin_ids: list[str] = Field(default_factory=list)
     participants: list[UserSearchResult]

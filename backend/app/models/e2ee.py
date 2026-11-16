@@ -71,3 +71,26 @@ class E2eeOneTimePrekey(Base):
     public_key: Mapped[str] = mapped_column(Text, nullable=False)
     signature: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MessageEnvelope(Base):
+    """One device's ciphertext for an E2EE message. Opaque to the server."""
+
+    __tablename__ = "message_envelopes"
+    __table_args__ = (
+        UniqueConstraint(
+            "message_id", "recipient_user_id", "recipient_device_id", name="uq_message_envelope"
+        ),
+        Index("ix_message_envelopes_recipient", "recipient_user_id", "recipient_device_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    recipient_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient_device_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { ApiError, apiFetch } from '@/api/client';
+import { ApiError, apiFetch, setRelayDeviceId } from '@/api/client';
+import type { Conversation, Message } from '@/api/types';
 import {
   type DeviceWire,
   type OneTimePrekeyWire,
@@ -17,11 +18,26 @@ import {
 import {
   type LocalDeviceState,
   type PinnedIdentity,
+  loadSession,
   loadState,
   loadTrust,
+  saveSession,
   saveState,
   saveTrust
 } from '@/crypto/keystore';
+import {
+  type ClaimedBundle,
+  type MessagePayload,
+  bundleFromClaim,
+  consumePrekeys,
+  decodePayload,
+  encodePayload,
+  localIdentity,
+  prekeySecrets
+} from '@/crypto/messaging';
+import { decrypt as decryptEnvelope, encrypt as encryptEnvelope, startSession } from '@/crypto/session';
+import { b64decodeAny, b64encode } from '@/crypto/wire';
+import { loadPlaintext, savePlaintext } from '@/services/message-storage';
 import { safetyNumber } from '@/crypto/safety-number';
 import { reportError } from '@/services/errors';
 import { useAuthStore } from '@/stores/auth';
@@ -52,6 +68,35 @@ export interface ContactKeys {
 }
 
 let ensurePromise: Promise<void> | null = null;
+
+/** Max decoded envelope size accepted from the server (padded 4000 chars + prekey header). */
+const MAX_ENVELOPE_BYTES = 12_288;
+const KEYS_TTL_MS = 30_000;
+
+export type E2eeErrorCode = 'not-ready' | 'peer-not-ready' | 'safety-number-changed' | 'needs-link';
+
+export class E2eeError extends Error {
+  constructor(public code: E2eeErrorCode) {
+    super(code);
+  }
+}
+
+export interface OutgoingEnvelope {
+  user_id: string;
+  device_id: string;
+  ciphertext: string;
+}
+
+// One lock for every session / prekey mutation: decrypting and encrypting both
+// advance ratchets and may consume one-time keys, and must never interleave.
+let lockTail: Promise<unknown> = Promise.resolve();
+function withLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = lockTail.then(task, task);
+  lockTail = run.catch(() => undefined);
+  return run;
+}
+
+const keysCache = new Map<string, { at: number; keys: ContactKeys | null }>();
 
 function prekey(id: number, pair: { pub: string; priv: string }): StoredPrekey {
   return { id, pub: pair.pub, priv: pair.priv, createdAt: Date.now() };
@@ -118,6 +163,8 @@ export const useE2eeStore = defineStore('e2ee', {
       this.identityKey = null;
       this.userId = null;
       ensurePromise = null;
+      keysCache.clear();
+      setRelayDeviceId(null);
     },
 
     /** Make sure this device has an identity, a registered device and enough prekeys. */
@@ -170,6 +217,7 @@ export const useE2eeStore = defineStore('e2ee', {
 
         this.identityKey = state.identity.pub;
         this.deviceId = state.device.deviceId;
+        setRelayDeviceId(state.device.deviceId);
         this.status = 'ready';
       } catch (error) {
         this.status = 'error';
@@ -315,6 +363,136 @@ export const useE2eeStore = defineStore('e2ee', {
         changedTo: null
       };
       await saveTrust(me, trust);
+    },
+
+    invalidateKeys() {
+      keysCache.clear();
+    },
+
+    /** Verified keys for a user, cached briefly. Own account: devices checked against our identity. */
+    async verifiedKeys(userId: string, fresh = false): Promise<ContactKeys | null> {
+      const cached = keysCache.get(userId);
+      if (!fresh && cached && Date.now() - cached.at < KEYS_TTL_MS) return cached.keys;
+      let keys: ContactKeys | null;
+      if (userId === this.userId) {
+        const own = await fetchUserKeys(userId);
+        if (!own || own.identity_key !== this.identityKey) throw new E2eeError('needs-link');
+        const devices = own.devices.filter((device) => {
+          try {
+            verifyDevice(own.identity_key, userId, device);
+            return true;
+          } catch (error) {
+            reportError('e2ee.verifyOwnDevice', error);
+            return false;
+          }
+        });
+        keys = {
+          userId,
+          identityKey: own.identity_key,
+          devices,
+          rejectedDevices: own.devices.length - devices.length,
+          pinned: { identityKey: own.identity_key, firstSeenAt: 0, verified: true }
+        };
+      } else {
+        keys = await this.contactKeys(userId);
+      }
+      keysCache.set(userId, { at: Date.now(), keys });
+      return keys;
+    },
+
+    /** Encrypt one payload for every device in the conversation except this one. */
+    encryptForConversation(
+      conversation: Conversation,
+      payload: MessagePayload,
+      freshKeys = false
+    ): Promise<{ envelopes: OutgoingEnvelope[]; sender_device_id: string }> {
+      return withLock(async () => {
+        await this.ensure();
+        const me = this.userId;
+        const state = me ? await loadState(me) : null;
+        if (this.status !== 'ready' || !me || !state?.device?.registered) throw new E2eeError('not-ready');
+        const plaintext = encodePayload(payload);
+        const envelopes: OutgoingEnvelope[] = [];
+        for (const participant of conversation.participants) {
+          const keys = await this.verifiedKeys(participant.id, freshKeys);
+          if (!keys || !keys.devices.length) throw new E2eeError('peer-not-ready');
+          // A changed, unacknowledged safety number blocks sending until reviewed.
+          if (keys.pinned.changedTo) throw new E2eeError('safety-number-changed');
+          for (const device of keys.devices) {
+            if (participant.id === me && device.device_id === state.device.deviceId) continue;
+            let session = await loadSession(me, participant.id, device.device_id);
+            if (!session) {
+              const claim = await apiFetch<ClaimedBundle>(
+                `/e2ee/users/${encodeURIComponent(participant.id)}/devices/${encodeURIComponent(device.device_id)}/claim`,
+                { method: 'POST' }
+              );
+              session = startSession(localIdentity(state), bundleFromClaim(claim, participant.id, keys.identityKey));
+            }
+            const { session: next, envelope } = encryptEnvelope(session, plaintext);
+            await saveSession(me, participant.id, device.device_id, next);
+            envelopes.push({ user_id: participant.id, device_id: device.device_id, ciphertext: b64encode(envelope) });
+          }
+        }
+        return { envelopes, sender_device_id: state.device.deviceId };
+      });
+    },
+
+    /**
+     * Resolve an E2EE message's text: from the local plaintext store if we have
+     * seen it, otherwise by decrypting this device's envelope exactly once.
+     */
+    async decryptMessage(message: Message): Promise<Message> {
+      if (!message.e2ee || message.deleted_at) return message;
+      const me = this.userId ?? useAuthStore().user?.id;
+      if (!me) return message;
+      const known = await loadPlaintext(me, message.id);
+      if (known) return { ...message, text: known.text, undecryptable: false };
+      let envelope = message.envelope ?? (this.deviceId ? message.envelopes?.[this.deviceId] : null);
+      const fromThisDevice = message.sender_id === me && message.sender_device_id === this.deviceId;
+      if (!envelope && !fromThisDevice && this.deviceId) {
+        // Some events (e.g. scheduled-message dispatch) arrive without envelopes.
+        try {
+          envelope = (await apiFetch<{ envelope: string }>(`/messages/${encodeURIComponent(message.id)}/envelope`)).envelope;
+        } catch (error) {
+          if (!(error instanceof ApiError && error.status === 404)) reportError('e2ee.fetchEnvelope', error);
+        }
+      }
+      if (!envelope || !message.sender_device_id) return { ...message, text: null, undecryptable: true };
+
+      try {
+        return await withLock(async () => {
+          // Another path may have decrypted it while we waited for the lock.
+          const again = await loadPlaintext(me, message.id);
+          if (again) return { ...message, text: again.text, undecryptable: false };
+          const state = await loadState(me);
+          if (!state?.device) throw new E2eeError('not-ready');
+          const keys = await this.verifiedKeys(message.sender_id);
+          const device = keys?.devices.find((entry) => entry.device_id === message.sender_device_id);
+          if (!keys || !device) throw new E2eeError('peer-not-ready');
+
+          const existing = await loadSession(me, message.sender_id, device.device_id);
+          const result = decryptEnvelope(
+            localIdentity(state),
+            prekeySecrets(state),
+            existing,
+            b64decodeAny(envelope, MAX_ENVELOPE_BYTES, 'envelope'),
+            { identityKey: keys.identityKey, agreementKey: device.agreement_key }
+          );
+          const payload = decodePayload(result.plaintext);
+          // Persist the plaintext before advancing the session: if we crash in
+          // between, the unchanged session can still decrypt the redelivery.
+          await savePlaintext(me, message.conversation_id, message.id, {
+            text: payload.text,
+            reply_to_id: payload.reply_to_id ?? null
+          });
+          await saveSession(me, message.sender_id, device.device_id, result.session);
+          if (consumePrekeys(state, result.consumed)) await saveState(state);
+          return { ...message, text: payload.text, undecryptable: false };
+        });
+      } catch (error) {
+        reportError('e2ee.decrypt', error);
+        return { ...message, text: null, undecryptable: true };
+      }
     },
 
     safetyNumberWith(contact: ContactKeys): string | null {

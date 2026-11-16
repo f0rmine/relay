@@ -19,6 +19,7 @@ class Conversation(Base):
         ForeignKey("messages.id", ondelete="SET NULL", use_alter=True, name="fk_conversations_pinned_message"), nullable=True
     )
     disappearing_after_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    e2ee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     invite_token: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )

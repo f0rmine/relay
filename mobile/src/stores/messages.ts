@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ApiError, apiFetch } from '@/api/client';
-import type { Attachment, Message } from '@/api/types';
+import type { Attachment, Conversation, Message } from '@/api/types';
 import { useAuthStore } from '@/stores/auth';
 import { useSocketStore } from '@/stores/socket';
 import {
@@ -9,9 +9,13 @@ import {
   loadOutbox,
   saveMessageCache,
   saveOutboxEntry,
-  type OutboxEntry
+  type OutboxEntry,
+  savePlaintext
 } from '@/services/message-storage';
 import { reportError } from '@/services/errors';
+import { translate } from '@/i18n';
+import { E2eeError, useE2eeStore } from '@/stores/e2ee';
+import { useConversationsStore } from '@/stores/conversations';
 
 interface MessagesState {
   byConversation: Record<string, Message[]>;
@@ -98,6 +102,21 @@ function localMessage(entry: OutboxEntry): Message {
   };
 }
 
+/** Look up a conversation, fetching it if needed, so we never guess its encryption mode. */
+async function conversationFor(conversationId: string): Promise<Conversation> {
+  const conversations = useConversationsStore();
+  const known = conversations.items.find((item) => item.id === conversationId);
+  if (known) return known;
+  const fetched = await apiFetch<Conversation>(`/conversations/${conversationId}`);
+  conversations.applyConversationInfo(fetched);
+  return fetched;
+}
+
+function e2eeFailure(error: E2eeError): ApiError {
+  // A 4xx ApiError marks the outbox entry as permanently failed (no retries).
+  return new ApiError(422, translate(`e2ee.sendError.${error.code}`));
+}
+
 export const useMessagesStore = defineStore('messages', {
   state: (): MessagesState => ({
     byConversation: {},
@@ -163,7 +182,11 @@ export const useMessagesStore = defineStore('messages', {
           next_cursor: string | null;
           has_more: boolean;
         }>(`/conversations/${conversationId}/messages${params}`);
-        const ascending = response.items.reverse();
+        const e2ee = useE2eeStore();
+        const ascending: Message[] = [];
+        for (const item of response.items.reverse()) {
+          ascending.push(item.e2ee ? await e2ee.decryptMessage(item) : item);
+        }
         const existing = this.byConversation[conversationId] || [];
         const fetchedIds = new Set(ascending.map((item) => item.id));
         this.byConversation[conversationId] = older
@@ -244,6 +267,48 @@ export const useMessagesStore = defineStore('messages', {
       this.sortMessages(list);
       this.byConversation[entry.conversationId] = list;
     },
+    /** Encrypt per device and send; re-encrypts once if the device list changed. */
+    async sendEncrypted(entry: OutboxEntry, conversation: Conversation): Promise<Message> {
+      const e2ee = useE2eeStore();
+      const text = entry.text ?? '';
+      const send = async (freshKeys: boolean) => {
+        const { envelopes, sender_device_id } = await e2ee.encryptForConversation(
+          conversation,
+          { v: 1, text, reply_to_id: entry.reply_to_id ?? null },
+          freshKeys
+        );
+        return apiFetch<Message>('/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            client_message_id: entry.id,
+            conversation_id: entry.conversationId,
+            envelopes,
+            sender_device_id,
+            ...(entry.reply_to_id ? { reply_to_id: entry.reply_to_id } : {}),
+            ...(entry.scheduled_at ? { scheduled_at: entry.scheduled_at } : {})
+          })
+        });
+      };
+      let message: Message;
+      try {
+        try {
+          message = await send(false);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 409) throw error;
+          e2ee.invalidateKeys();
+          message = await send(true);
+        }
+      } catch (error) {
+        if (error instanceof E2eeError) throw e2eeFailure(error);
+        throw error;
+      }
+      // We can't decrypt our own envelope (there isn't one), so keep the text now.
+      await savePlaintext(entry.userId, entry.conversationId, message.id, {
+        text,
+        reply_to_id: entry.reply_to_id ?? null
+      });
+      return { ...message, text, undecryptable: false };
+    },
     scheduleFlush(timestamp: number) {
       if (retryTimer && retryAt <= timestamp) return;
       if (retryTimer) clearTimeout(retryTimer);
@@ -266,6 +331,10 @@ export const useMessagesStore = defineStore('messages', {
       await saveOutboxEntry(entry);
       this.putLocalMessage(entry);
       try {
+        if (entry.attachment && (await conversationFor(entry.conversationId)).e2ee) {
+          // Attachments would be uploaded readable by the server; Phase 2c adds encrypted ones.
+          throw new ApiError(422, translate('e2ee.sendError.attachments'));
+        }
         if (entry.attachment && !entry.uploadedAttachmentIds.length) {
           const file = new File(
             [entry.attachment.data],
@@ -276,6 +345,13 @@ export const useMessagesStore = defineStore('messages', {
           if (epoch !== lifecycleEpoch || useAuthStore().user?.id !== userId) return 'stale';
           entry.uploadedAttachmentIds = [attachment.id];
           await saveOutboxEntry(entry);
+        }
+        const conversation = await conversationFor(entry.conversationId);
+        if (conversation.e2ee) {
+          const message = await this.sendEncrypted(entry, conversation);
+          if (epoch !== lifecycleEpoch || useAuthStore().user?.id !== userId) return 'stale';
+          await this.acknowledge(message);
+          return 'delivered';
         }
         const message = await apiFetch<Message>('/messages', {
           method: 'POST',
@@ -394,6 +470,11 @@ export const useMessagesStore = defineStore('messages', {
       this.markDeleted(message);
     },
     async edit(messageId: string, text: string) {
+      const known = Object.values(this.byConversation).flat().find((item) => item.id === messageId);
+      if (known?.e2ee) {
+        // Never send an edited plaintext to the server for an encrypted message.
+        throw new ApiError(422, translate('e2ee.sendError.edit'));
+      }
       const message = await apiFetch<Message>(`/messages/${messageId}`, {
         method: 'PATCH',
         body: JSON.stringify({ text })
@@ -417,6 +498,10 @@ export const useMessagesStore = defineStore('messages', {
       }
       const list = this.byConversation[message.conversation_id] || [];
       const index = list.findIndex((item) => item.id === message.id);
+      if (index >= 0 && message.e2ee && message.text == null && list[index].text != null && !message.deleted_at) {
+        // Server events (reactions, reads) never carry E2EE text; keep what we decrypted.
+        message = { ...message, text: list[index].text, undecryptable: false };
+      }
       if (index >= 0) list[index] = { ...message, delivery_state: undefined };
       else list.push({ ...message, delivery_state: undefined });
       this.sortMessages(list);

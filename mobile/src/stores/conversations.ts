@@ -31,10 +31,10 @@ export const useConversationsStore = defineStore('conversations', {
         this.loading = false;
       }
     },
-    async start(participantId: string): Promise<Conversation> {
+    async start(participantId: string, e2ee = false): Promise<Conversation> {
       const conversation = await apiFetch<Conversation>('/conversations', {
         method: 'POST',
-        body: JSON.stringify({ participant_id: participantId })
+        body: JSON.stringify({ participant_id: participantId, ...(e2ee ? { e2ee: true } : {}) })
       });
       this.upsert(conversation);
       return conversation;

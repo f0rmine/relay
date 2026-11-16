@@ -63,6 +63,8 @@ def serialize_message(message: Message) -> dict:
                 "mentions": [],
                 "link_preview": None,
                 "expires_at": message.expires_at,
+                "e2ee": message.e2ee,
+                "sender_device_id": message.sender_device_id,
             }
         )
     text = _safe_text(message)
@@ -88,6 +90,8 @@ def serialize_message(message: Message) -> dict:
             "mentions": parse_mentions(message),
             "link_preview": link_preview,
             "expires_at": message.expires_at,
+            "e2ee": message.e2ee,
+            "sender_device_id": message.sender_device_id,
         }
     )
 

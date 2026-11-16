@@ -26,7 +26,7 @@ vi.mock('@/api/client', () => {
       super(message);
     }
   }
-  return { ApiError, apiFetch: mocks.apiFetch };
+  return { ApiError, apiFetch: mocks.apiFetch, setRelayDeviceId: vi.fn() };
 });
 vi.mock('@/services/errors', () => ({ reportError: mocks.reportError }));
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 'me' } }) }));

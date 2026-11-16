@@ -21,6 +21,21 @@ vi.mock('@/stores/socket', () => ({
   useSocketStore: () => ({ send: () => true })
 }));
 
+// A regular (not end-to-end encrypted) chat, so these tests cover the legacy path.
+vi.mock('@/stores/conversations', () => ({
+  useConversationsStore: () => ({
+    items: { find: () => ({ id: 'conversation-1', e2ee: false, participants: [] }) },
+    applyConversationInfo: () => undefined
+  })
+}));
+
+vi.mock('@/stores/e2ee', () => ({
+  E2eeError: class E2eeError extends Error {},
+  useE2eeStore: () => ({ decryptMessage: async (message: unknown) => message })
+}));
+
+vi.mock('@/i18n', () => ({ translate: (key: string) => key }));
+
 vi.mock('@/services/message-storage', () => ({
   saveOutboxEntry: mocks.saveOutboxEntry,
   deleteOutboxEntry: mocks.deleteOutboxEntry,

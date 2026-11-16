@@ -29,6 +29,8 @@ const peer = computed(() => props.conversation.participants.find((user) => user.
 function messagePreview(message: Message): string {
   if (message.deleted_at) return t('message.deleted');
   if (message.text?.trim()) return message.text.trim();
+  // E2EE text is never on the server; the list shows a neutral label.
+  if (message.e2ee) return t('e2ee.encryptedMessage');
   const attachment = message.attachments?.[0];
   if (attachment?.mime_type.startsWith('image/')) return t('message.image');
   if (attachment) return t('message.attachment');

@@ -44,7 +44,7 @@ async def get_private_conversation_by_key(db: AsyncSession, private_key: str) ->
 
 
 async def get_or_create_private_conversation(
-    db: AsyncSession, current_user_id: str, participant_id: str
+    db: AsyncSession, current_user_id: str, participant_id: str, e2ee: bool = False
 ) -> Conversation:
     if current_user_id == participant_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot create conversation with yourself")
@@ -56,10 +56,19 @@ async def get_or_create_private_conversation(
     if await is_blocked(db, current_user_id, participant_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     key = private_key_for(current_user_id, participant_id)
+    if e2ee:
+        from app.services.e2ee_messages import users_ready_for_e2ee
+
+        # A separate conversation: an existing legacy chat is never silently upgraded.
+        key = f"{key}:e2ee"
+        if not await users_ready_for_e2ee(db, [current_user_id, participant_id]):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Both people need encryption keys set up first"
+            )
     conversation = await get_private_conversation_by_key(db, key)
     if conversation:
         return conversation
-    conversation = Conversation(private_key=key)
+    conversation = Conversation(private_key=key, e2ee=e2ee)
     db.add(conversation)
     try:
         await db.flush()

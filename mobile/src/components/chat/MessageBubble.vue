@@ -185,7 +185,12 @@ const textSegments = computed<Array<{ text: string; mention: boolean }>>(() => {
 const isFailed = computed(() => props.message.delivery_state === 'failed');
 const canDelete = computed(() => props.own && !isPending.value && !props.message.deleted_at);
 const canEdit = computed(
-  () => props.own && !isPending.value && !props.message.deleted_at && !!props.message.text
+  () =>
+    props.own &&
+    !isPending.value &&
+    !props.message.deleted_at &&
+    !!props.message.text &&
+    !props.message.e2ee
 );
 const reactionChips = computed(() =>
   (props.message.reactions || []).map((group) => ({

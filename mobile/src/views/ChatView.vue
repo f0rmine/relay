@@ -5,6 +5,7 @@
     </ion-header>
     <ion-content class="chat-content" :scroll-y="false">
       <ErrorState v-if="error" :message="error" class="chat-error" />
+      <p v-if="conversation?.e2ee" class="e2ee-banner" data-testid="e2ee-banner">🔒 {{ t('e2ee.chatBanner') }}</p>
       <ChatWindow
         :messages="messages.byConversation[conversationId] || []"
         :conversation="conversation"
@@ -34,6 +35,7 @@
       :editing-message="editingMessage"
       :reply-message="replyMessage"
       :participants="conversation?.participants || []"
+      :encrypted="Boolean(conversation?.e2ee)"
       :initial-value="draft"
       @send="send"
       @typing="typing"
@@ -347,5 +349,14 @@ function clearHighlight() {
   inset-inline: 8px;
   top: 8px;
   z-index: 3;
+}
+.e2ee-banner {
+  margin: 6px 12px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ion-color-light);
+  color: var(--relay-muted);
+  font-size: 12px;
+  text-align: center;
 }
 </style>

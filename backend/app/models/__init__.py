@@ -2,7 +2,7 @@ from app.models.attachment import Attachment
 from app.models.auth import PasswordResetToken, RefreshToken
 from app.models.conversation import Conversation, ConversationParticipant
 from app.models.device import DeviceToken
-from app.models.e2ee import E2eeDevice, E2eeIdentity, E2eeOneTimePrekey
+from app.models.e2ee import E2eeDevice, E2eeIdentity, E2eeOneTimePrekey, MessageEnvelope
 from app.models.export_job import ExportJob
 from app.models.link_preview import LinkPreview
 from app.models.message import Message, MessageReaction, MessageRead
@@ -21,6 +21,7 @@ __all__ = [
     "ExportJob",
     "LinkPreview",
     "Message",
+    "MessageEnvelope",
     "MessageReaction",
     "MessageRead",
     "PasswordResetToken",

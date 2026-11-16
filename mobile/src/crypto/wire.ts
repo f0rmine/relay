@@ -46,6 +46,24 @@ export function b64decode(value: string, expectedLength: number, what: string): 
   return bytes;
 }
 
+/** Strict unpadded base64url decode for variable-length data (envelopes). */
+export function b64decodeAny(value: string, maxLength: number, what: string): Uint8Array {
+  if (typeof value !== 'string' || !value || value.length > Math.ceil((maxLength * 4) / 3)) {
+    throw new WireError(`${what}: missing or too long`);
+  }
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new WireError(`${what}: expected unpadded base64url`);
+  let binary: string;
+  try {
+    binary = atob(padded);
+  } catch {
+    throw new WireError(`${what}: invalid base64url`);
+  }
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  if (b64encode(bytes) !== value) throw new WireError(`${what}: non-canonical base64url`);
+  return bytes;
+}
+
 function text(value: string): Uint8Array {
   if (value.includes('\u0000')) throw new WireError('identifiers must not contain NUL');
   return utf8ToBytes(value);

@@ -1,9 +1,10 @@
 # Relay end-to-end encryption plan
 
-Status: **Phase 1 (identity and key directory) in progress.** Messages are still
-protected by server-side encryption at rest only. Relay must not be described as
-end-to-end encrypted until Phase 2 ships *and* an independent security review of
-the protocol code has been completed.
+Status: **Phase 2 in progress.** Phase 1 (key directory) and Phase 2a/2b (protocol
+core, encrypted 1:1 text chats as an opt-in preview) have shipped. Regular chats
+are still protected by server-side encryption at rest only. Relay must not be
+described as end-to-end encrypted until Phase 2 is complete *and* an independent
+security review of the protocol code has been done.
 
 ## 1. Goal and threat model
 
@@ -122,12 +123,18 @@ message for the whole transition. Instead:
 
 ## 8. Phases
 
-1. **Identity and key directory** *(in progress)*: key generation on device, private
+1. **Identity and key directory** *(done, v1.9.0)*: key generation on device, private
    keys in the platform keystore, signed device records, signed and one-time
    prekeys with atomic claim, safety numbers screen, key-change detection.
-2. **1:1 E2EE:** PQXDH and Double Ratchet, envelope format, per-device fan-out,
-   client-encrypted attachments, encrypted edits, reactions and deletes, device
-   linking via QR.
+2. **1:1 E2EE:**
+   - 2a *(done, v1.9.1)*: PQXDH + Double Ratchet core, envelope format, padding.
+   - 2b *(done, v1.10.0)*: opt-in encrypted 1:1 chats (text). One envelope per
+     recipient device; the server rejects sends that don't cover exactly the
+     active devices; each device fetches only its own envelope; decrypted text
+     lives only in an on-device store (ratchet keys are single-use).
+   - 2c: client-encrypted attachments and voice notes.
+   - 2d: device linking via QR, encrypted edits.
+   - Known metadata in 2b: reply targets and reactions are visible to the server.
 3. **Groups:** Sender Keys with rotation on every membership change; invite-link
    joins receive keys from existing members.
 4. **Feature replacements:** on-device search, client thumbnails, client export,

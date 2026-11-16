@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,3 +63,20 @@ async def get_ws_user_from_token(db: AsyncSession, token: str | None) -> User:
     if getattr(user, "deleted_at", None) is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     return user
+
+
+def get_device_id(
+    x_relay_device: Annotated[str | None, Header(max_length=64)] = None,
+) -> str | None:
+    """The E2EE device making the request, if the client sent one.
+
+    Not authenticated on its own: envelope lookups are always also filtered by
+    the authenticated user, so a forged value can only select the caller's own
+    (or no) envelopes.
+    """
+    if x_relay_device and x_relay_device.replace("-", "").replace("_", "").isalnum():
+        return x_relay_device
+    return None
+
+
+DeviceId = Annotated[str | None, Depends(get_device_id)]

@@ -169,6 +169,13 @@ export function displayError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+let relayDeviceId: string | null = null;
+
+/** The registered E2EE device id, sent so the server returns this device's envelopes. */
+export function setRelayDeviceId(deviceId: string | null): void {
+  relayDeviceId = deviceId;
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit & { timeoutMs?: number; skipAuthRefresh?: boolean } = {}
@@ -182,6 +189,7 @@ export async function apiFetch<T>(
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
+  if (relayDeviceId) headers.set('X-Relay-Device', relayDeviceId);
 
   let response = await safeFetch(path, { ...options, headers });
   if (response.status === 401 && !skipAuthRefresh) {

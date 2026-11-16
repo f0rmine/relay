@@ -9,6 +9,7 @@
 import { Capacitor } from '@capacitor/core';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import type { StoredKeyPair, StoredPrekey } from './keys';
+import type { Session } from './session';
 
 const useSecureStorage = Capacitor.isNativePlatform();
 const PREFIX = 'e2ee:v1:';
@@ -99,4 +100,24 @@ export async function loadTrust(userId: string): Promise<TrustStore> {
 
 export async function saveTrust(userId: string, trust: TrustStore): Promise<void> {
   await write(trustKey(userId), JSON.stringify(trust));
+}
+
+const sessionKey = (userId: string, peerUserId: string, peerDeviceId: string) =>
+  `${PREFIX}session:${userId}:${peerUserId}:${peerDeviceId}`;
+
+export async function loadSession(
+  userId: string,
+  peerUserId: string,
+  peerDeviceId: string
+): Promise<Session | null> {
+  return parse<Session>(await read(sessionKey(userId, peerUserId, peerDeviceId)));
+}
+
+export async function saveSession(
+  userId: string,
+  peerUserId: string,
+  peerDeviceId: string,
+  session: Session
+): Promise<void> {
+  await write(sessionKey(userId, peerUserId, peerDeviceId), JSON.stringify(session));
 }

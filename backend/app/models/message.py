@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -60,6 +61,9 @@ class Message(Base):
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # E2EE messages carry no text; recipients get per-device envelopes instead.
+    e2ee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    sender_device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     conversation = relationship(
         "Conversation", back_populates="messages", foreign_keys=[conversation_id]

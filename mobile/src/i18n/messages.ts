@@ -282,7 +282,7 @@ export const messages = {
       safetyNumbers: 'Safety numbers',
       openSafetyNumbers: 'Verify safety numbers',
       notYetE2ee:
-        "Messages aren't end-to-end encrypted yet. Verifying safety numbers now means you'll know if a contact's keys ever change.",
+        "Only encrypted chats (preview) are end-to-end encrypted; regular chats are protected by server-side encryption. Verifying safety numbers means you'll know if a contact's keys ever change.",
       explain:
         'Compare these numbers with {name} in person or on a call. If they match, nobody has swapped the keys between you.',
       verified: 'Verified',
@@ -303,7 +303,20 @@ export const messages = {
       resetWarning:
         "This creates a new identity on this device and revokes your other devices' keys. Your contacts will see that your safety number changed.",
       resetConfirm: 'Reset',
-      resetFailed: 'Could not reset the encryption identity.'
+      resetFailed: 'Could not reset the encryption identity.',
+      startEncrypted: 'Encrypted chat (preview)',
+      startEncryptedHint:
+        'Messages are end-to-end encrypted between your devices. Text only for now: attachments and voice notes come next. Both of you need the latest app.',
+      chatBanner: 'End-to-end encrypted chat (preview). Only your devices can read these messages.',
+      encryptedMessage: '🔒 Encrypted message',
+      sendError: {
+        'not-ready': "Your encryption keys aren't ready yet. Try again in a moment.",
+        'peer-not-ready': "This person hasn't set up encryption keys on any device.",
+        'safety-number-changed': 'Their safety number changed. Review it in chat info before sending.',
+        'needs-link': 'This device is not linked to your encryption identity.',
+        attachments: "Attachments can't be sent in encrypted chats yet.",
+        edit: "Encrypted messages can't be edited yet."
+      }
     },
     api: {
       requestFailed: 'Request failed',
@@ -635,7 +648,7 @@ export const messages = {
       safetyNumbers: 'Коди безпеки',
       openSafetyNumbers: 'Перевірити коди безпеки',
       notYetE2ee:
-        'Повідомлення поки що не мають наскрізного шифрування. Перевіривши коди безпеки зараз, ви дізнаєтеся, якщо ключі контакту колись зміняться.',
+        'Наскрізно шифруються лише зашифровані чати (попередня версія); звичайні чати захищені шифруванням на сервері. Перевіривши коди безпеки, ви дізнаєтеся, якщо ключі контакту колись зміняться.',
       explain:
         'Порівняйте ці цифри з {name} особисто або під час дзвінка. Якщо вони збігаються, ніхто не підмінив ключі між вами.',
       verified: 'Перевірено',
@@ -656,7 +669,20 @@ export const messages = {
       resetWarning:
         'Буде створено нову ідентичність на цьому пристрої, а ключі інших ваших пристроїв буде відкликано. Ваші контакти побачать, що ваш код безпеки змінився.',
       resetConfirm: 'Скинути',
-      resetFailed: 'Не вдалося скинути ідентичність шифрування.'
+      resetFailed: 'Не вдалося скинути ідентичність шифрування.',
+      startEncrypted: 'Зашифрований чат (попередня версія)',
+      startEncryptedHint:
+        'Повідомлення наскрізно шифруються між вашими пристроями. Поки що лише текст: вкладення та голосові з’являться далі. Вам обом потрібна остання версія застосунку.',
+      chatBanner: 'Наскрізно зашифрований чат (попередня версія). Ці повідомлення можуть прочитати лише ваші пристрої.',
+      encryptedMessage: '🔒 Зашифроване повідомлення',
+      sendError: {
+        'not-ready': 'Ваші ключі шифрування ще не готові. Спробуйте за мить.',
+        'peer-not-ready': 'Ця людина ще не налаштувала ключі шифрування на жодному пристрої.',
+        'safety-number-changed': 'Код безпеки співрозмовника змінився. Перевірте його в інформації про чат перед надсиланням.',
+        'needs-link': 'Цей пристрій не пов’язаний з вашою ідентичністю шифрування.',
+        attachments: 'Вкладення поки що не можна надсилати в зашифрованих чатах.',
+        edit: 'Зашифровані повідомлення поки що не можна редагувати.'
+      }
     },
     api: {
       requestFailed: 'Запит не вдався',

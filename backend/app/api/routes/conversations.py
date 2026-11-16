@@ -6,7 +6,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, DeviceId
 from app.core.redis import get_redis
 from app.models.conversation import Conversation, ConversationParticipant
 from app.schemas.conversation import (
@@ -37,6 +37,7 @@ from app.services.conversations import (
     set_pinned_message,
     unread_counts,
 )
+from app.services.e2ee_messages import attach_device_envelopes
 from app.services.messages import decode_message_cursor, encode_message_cursor, list_messages
 from app.services.presence import online_map
 from app.websocket.events import conversation_participant_ids, serialize_message
@@ -83,6 +84,7 @@ async def serialize_conversations(
                 disappearing_after_seconds=getattr(
                     conversation, "disappearing_after_seconds", None
                 ),
+                e2ee=conversation.e2ee,
                 is_admin=any(
                     participant.user_id == current_user_id and participant.is_admin
                     for participant in conversation.participants
@@ -128,7 +130,9 @@ async def conversations(current_user: CurrentUser, db: DbSession) -> list[Conver
 async def create_conversation(
     payload: ConversationCreate, current_user: CurrentUser, db: DbSession
 ) -> ConversationDetail:
-    conversation = await get_or_create_private_conversation(db, current_user.id, payload.participant_id)
+    conversation = await get_or_create_private_conversation(
+        db, current_user.id, payload.participant_id, e2ee=payload.e2ee
+    )
     serialized = await serialize_conversation(db, conversation, current_user.id)
     return ConversationDetail.model_validate(serialized.model_dump())
 
@@ -338,6 +342,7 @@ async def get_messages(
     conversation_id: str,
     current_user: CurrentUser,
     db: DbSession,
+    device_id: DeviceId,
     cursor: str | None = Query(default=None, max_length=512),
     limit: int = Query(default=30, ge=1, le=100),
     type: str | None = Query(default=None, pattern="^(media|files|audio)$"),
@@ -346,7 +351,9 @@ async def get_messages(
     rows, has_more = await list_messages(
         db, current_user.id, conversation_id, decoded_cursor, limit, message_type=type
     )
-    items = [serialize_message(row) for row in rows]
+    items = await attach_device_envelopes(
+        db, [serialize_message(row) for row in rows], current_user.id, device_id
+    )
     return MessageHistory(
         items=items,
         has_more=has_more,

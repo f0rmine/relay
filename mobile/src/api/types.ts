@@ -54,6 +54,11 @@ export interface Message {
   mentions?: string[];
   link_preview?: LinkPreview | null;
   expires_at?: string | null;
+  /** End-to-end encrypted: text arrives only inside a per-device envelope. */
+  e2ee?: boolean;
+  sender_device_id?: string | null;
+  envelope?: string | null;
+  envelopes?: Record<string, string> | null;
 }
 
 export interface Conversation {
@@ -66,6 +71,7 @@ export interface Conversation {
   admin_ids?: string[];
   pinned_message_id?: string | null;
   disappearing_after_seconds?: number | null;
+  e2ee?: boolean;
   participants: User[];
   latest_message?: Message | null;
   unread_count: number;

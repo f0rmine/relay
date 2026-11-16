@@ -11,6 +11,14 @@
     </ion-header>
     <ion-content class="page-content">
       <ErrorState v-if="error" :message="error" />
+      <ion-list>
+        <ion-item lines="none">
+          <ion-toggle v-model="encrypted" data-testid="encrypted-toggle" label-placement="end" justify="start">
+            🔒 {{ t('e2ee.startEncrypted') }}
+          </ion-toggle>
+        </ion-item>
+        <p v-if="encrypted" class="hint">{{ t('e2ee.startEncryptedHint') }}</p>
+      </ion-list>
       <ion-list v-if="results.length">
         <UserSearchResult v-for="user in results" :key="user.id" :user="user" show-block @select="startChat" @block="blockUser" />
       </ion-list>
@@ -22,7 +30,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { IonBackButton, IonButtons, IonContent, IonHeader, IonList, IonPage, IonSearchbar, IonTitle, IonToolbar } from '@ionic/vue';
+import { IonBackButton, IonButtons, IonContent, IonHeader, IonItem, IonList, IonPage, IonSearchbar, IonTitle, IonToggle, IonToolbar } from '@ionic/vue';
 import { useI18n } from 'vue-i18n';
 import { apiFetch, displayError } from '@/api/client';
 import type { User } from '@/api/types';
@@ -33,6 +41,7 @@ import { useBlocksStore } from '@/stores/blocks';
 import { useConversationsStore } from '@/stores/conversations';
 
 const query = ref('');
+const encrypted = ref(false);
 const results = ref<User[]>([]);
 const error = ref('');
 const router = useRouter();
@@ -70,7 +79,7 @@ async function blockUser(user: User) {
 async function startChat(user: User) {
   error.value = '';
   try {
-    const conversation = await conversations.start(user.id);
+    const conversation = await conversations.start(user.id, encrypted.value);
     router.replace(`/chat/${conversation.id}`);
   } catch (err: unknown) {
     error.value = displayError(err, t('search.startFailed'));
@@ -81,5 +90,10 @@ async function startChat(user: User) {
 <style scoped>
 ion-searchbar {
   --color: #ffffff;
+}
+.hint {
+  margin: 0 16px 8px;
+  color: var(--relay-muted);
+  font-size: 12px;
 }
 </style>

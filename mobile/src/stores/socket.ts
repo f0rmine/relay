@@ -4,6 +4,7 @@ import { refreshTokens } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
+import { useE2eeStore } from '@/stores/e2ee';
 import type { Conversation, Message } from '@/api/types';
 import { initNotifications, notifyNewMessage } from '@/services/notifications';
 import { activeConversationId } from '@/services/navigation';
@@ -251,6 +252,16 @@ export const useSocketStore = defineStore('socket', {
       }
       if (!this.authenticated) return;
       if (type === 'message:new') {
+        const raw = payload as unknown as Message;
+        if (raw.e2ee) {
+          // Decrypt first (async, serialized), then run the normal pipeline.
+          void useE2eeStore().decryptMessage(raw).then((decrypted) => this.handle('message:new:resolved', decrypted));
+          return;
+        }
+        this.handle('message:new:resolved', raw);
+        return;
+      }
+      if (type === 'message:new:resolved') {
         const incoming = payload as unknown as Message;
         const auth = useAuthStore();
         const currentConversationId = activeConversationId();

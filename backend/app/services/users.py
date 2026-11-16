@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.auth import PasswordResetToken, RefreshToken
 from app.models.device import DeviceToken
-from app.models.e2ee import E2eeDevice, E2eeIdentity, E2eeOneTimePrekey
+from app.models.e2ee import E2eeDevice, E2eeIdentity, E2eeOneTimePrekey, MessageEnvelope
 from app.models.user import User
 from app.services.attachments import sniff_image_type
 from app.services.uploads import read_upload_limited
@@ -152,6 +152,7 @@ async def delete_user_account(db: AsyncSession, user: User) -> User:
             )
         )
     )
+    await db.execute(delete(MessageEnvelope).where(MessageEnvelope.recipient_user_id == user.id))
     await db.execute(delete(E2eeDevice).where(E2eeDevice.user_id == user.id))
     await db.execute(delete(E2eeIdentity).where(E2eeIdentity.user_id == user.id))
     await db.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))

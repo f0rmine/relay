@@ -46,7 +46,7 @@
       </button>
     </div>
     <div class="bar">
-      <ion-button v-if="!editingMessage" fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
+      <ion-button v-if="!editingMessage && !encrypted" fill="clear" class="attach-button" shape="round" @click="pick" :aria-label="t('chat.attachFile')">
         <ion-icon :icon="attachOutline" />
       </ion-button>
       <input ref="fileInput" class="hidden" type="file" accept="image/*,video/*,audio/*,application/pdf,text/plain,.doc,.docx" @change="onFile" />
@@ -78,7 +78,7 @@
         <ion-icon :icon="timeOutline" />
       </ion-button>
       <ion-button
-        v-if="!editingMessage && !canSend && !recording"
+        v-if="!editingMessage && !canSend && !recording && !encrypted"
         fill="clear"
         shape="round"
         class="attach-button"
@@ -113,6 +113,8 @@ const props = defineProps<{
   replyMessage?: import('@/api/types').Message | null;
   initialValue?: string;
   participants?: Array<{ id: string; display_name: string; username: string }>;
+  /** E2EE chat: attachments and voice notes are not encrypted yet, so they are hidden. */
+  encrypted?: boolean;
 }>();
 const emit = defineEmits<{
   send: [text: string, file: File | null, complete: (accepted: boolean) => void, scheduledAt?: string | null, mentions?: string[]];
