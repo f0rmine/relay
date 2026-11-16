@@ -6,6 +6,7 @@ import { Network } from '@capacitor/network';
 import * as Sentry from '@sentry/vue';
 
 import { SENTRY_DSN } from './config/env';
+import { sentryPrivacyOptions } from './config/sentry';
 
 import '@ionic/vue/css/core.css';
 import '@ionic/vue/css/normalize.css';
@@ -29,8 +30,7 @@ const app = createApp(App).use(pinia).use(i18n).use(IonicVue).use(router);
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
-    sendDefaultPii: false,
-    tracesSampleRate: 0.1,
+    ...sentryPrivacyOptions(),
     integrations: [
       Sentry.vueIntegration({ app }),
       Sentry.browserTracingIntegration({ router })
