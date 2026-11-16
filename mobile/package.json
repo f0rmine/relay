@@ -22,7 +22,7 @@
     "@capacitor/network": "^6.0.4",
     "@capacitor/push-notifications": "^6.0.5",
     "@capawesome/capacitor-badge": "^6.0.0",
-    "@ionic/vue": "^8.2.0",
+    "@ionic/vue": "^9.0.11",
     "@ionic/vue-router": "^8.2.0",
     "@sentry/vue": "^8.55.2",
     "ionicons": "^7.4.0",
