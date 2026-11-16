@@ -157,3 +157,19 @@ export function verifyDevice(identityKey: string, userId: string, device: Device
     'pq prekey'
   );
 }
+
+/**
+ * Verify a post-quantum one-time prekey handed out by the server for a device
+ * (claim endpoint). Its signature by the device signing key is what stops the
+ * server from substituting a KEM key it controls.
+ */
+export function verifyPqOneTimePrekey(device: DeviceWire, prekey: SignedPrekeyWire): void {
+  const signing = b64decode(device.signing_key, ED25519_KEY_BYTES, 'signing key');
+  const pub = b64decode(prekey.public_key, MLKEM768_PUBLIC_KEY_BYTES, 'pq one-time prekey');
+  verifySignature(
+    signing,
+    prekey.signature,
+    prekeyMessage(PQ_PREKEY_LABEL, device.device_id, prekey.key_id, pub),
+    'pq one-time prekey'
+  );
+}

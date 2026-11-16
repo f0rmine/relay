@@ -225,6 +225,7 @@ export const useE2eeStore = defineStore('e2ee', {
       const { ec, kem } = generateOneTime(device, ecMissing, kemMissing);
       let signed: ReturnType<typeof signedPrekeyWire> | undefined;
       if (rotate) {
+        device.previousSignedPrekey = device.signedPrekey;
         device.signedPrekey = prekey(device.nextKeyId++, generateAgreementKey());
         signed = signedPrekeyWire(device.signing, device.deviceId, device.signedPrekey);
       }

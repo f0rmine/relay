@@ -21,6 +21,8 @@ export interface LocalDeviceState {
     signing: StoredKeyPair;
     agreement: StoredKeyPair;
     signedPrekey: StoredPrekey;
+    /** Kept after rotation so sessions started against it just before can still complete. */
+    previousSignedPrekey?: StoredPrekey | null;
     pqPrekey: StoredPrekey;
     /** Private halves of one-time prekeys still on the server, by key id. */
     oneTime: Record<string, string>;

@@ -9,7 +9,8 @@ import {
   pqPrekeyWire,
   signDevice,
   signedPrekeyWire,
-  verifyDevice
+  verifyDevice,
+  verifyPqOneTimePrekey
 } from './keys';
 import { WireError } from './wire';
 
@@ -26,7 +27,7 @@ function makeDevice(userId = 'user-1') {
     signed_prekey: signedPrekeyWire(signing, deviceId, { id: 1, createdAt: 0, ...generateAgreementKey() }),
     pq_prekey: pqPrekeyWire(signing, deviceId, { id: 2, createdAt: 0, ...generatePqKey() })
   };
-  return { identity, device };
+  return { identity, device, signing };
 }
 
 describe('device verification', () => {
@@ -60,5 +61,13 @@ describe('device verification', () => {
         pq_prekey: { ...device.pq_prekey, key_id: device.pq_prekey.key_id + 1 }
       })
     ).toThrow(WireError);
+  });
+
+  it('verifies claimed PQ one-time prekeys against the device signing key', () => {
+    const { device, signing } = makeDevice();
+    const genuine = pqPrekeyWire(signing, device.device_id, { id: 9, createdAt: 0, ...generatePqKey() });
+    expect(() => verifyPqOneTimePrekey(device, genuine)).not.toThrow();
+    const substituted = pqPrekeyWire(generateSigningKey(), device.device_id, { id: 9, createdAt: 0, ...generatePqKey() });
+    expect(() => verifyPqOneTimePrekey(device, substituted)).toThrow(WireError);
   });
 });
