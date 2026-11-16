@@ -12,6 +12,7 @@ from app.api.routes import (
     auth,
     conversations,
     devices,
+    e2ee,
     exports,
     invites,
     link_previews,
@@ -174,7 +175,7 @@ if settings.sentry_dsn:
 
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
 (settings.upload_dir / "avatars").mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=settings.app_name, version="1.8.3", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.9.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -194,6 +195,7 @@ app.include_router(messages.router)
 app.include_router(search.router)
 app.include_router(attachments.router)
 app.include_router(devices.router)
+app.include_router(e2ee.router)
 app.include_router(link_previews.router)
 app.include_router(exports.router)
 app.include_router(invites.router)

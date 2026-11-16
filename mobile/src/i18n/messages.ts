@@ -277,6 +277,34 @@ export const messages = {
       channelDescription: 'New chat message notifications',
       newMessage: 'New message'
     },
+    e2ee: {
+      title: 'Encryption',
+      safetyNumbers: 'Safety numbers',
+      openSafetyNumbers: 'Verify safety numbers',
+      notYetE2ee:
+        "Messages aren't end-to-end encrypted yet. Verifying safety numbers now means you'll know if a contact's keys ever change.",
+      explain:
+        'Compare these numbers with {name} in person or on a call. If they match, nobody has swapped the keys between you.',
+      verified: 'Verified',
+      markVerified: 'Mark as verified',
+      unmarkVerified: 'Clear verification',
+      keyChanged:
+        "{name}'s safety number has changed. This usually means they reinstalled the app or reset encryption, but it could also mean someone is intercepting. Verify again before trusting it.",
+      acceptChange: 'Accept new safety number',
+      noKeys: "{name} hasn't set up encryption keys yet.",
+      rejectedDevices: '{count} device(s) failed signature checks and will be ignored.',
+      loadFailed: 'Could not load encryption keys.',
+      statusReady: 'Encryption keys are set up on this device.',
+      statusWorking: 'Setting up encryption keys…',
+      statusNeedsLink:
+        'Your encryption identity lives on another device. Linking devices is coming soon; until then you can reset it here.',
+      statusError: "Encryption keys couldn't be set up. They'll be retried automatically.",
+      resetTitle: 'Reset encryption identity',
+      resetWarning:
+        "This creates a new identity on this device and revokes your other devices' keys. Your contacts will see that your safety number changed.",
+      resetConfirm: 'Reset',
+      resetFailed: 'Could not reset the encryption identity.'
+    },
     api: {
       requestFailed: 'Request failed',
       cannotReach: 'Cannot reach backend at {url}. Check the server, Tailscale/LAN IP, and mobile .env URL.',
@@ -601,6 +629,34 @@ export const messages = {
       channelName: 'Повідомлення',
       channelDescription: 'Сповіщення про нові повідомлення в чаті',
       newMessage: 'Нове повідомлення'
+    },
+    e2ee: {
+      title: 'Шифрування',
+      safetyNumbers: 'Коди безпеки',
+      openSafetyNumbers: 'Перевірити коди безпеки',
+      notYetE2ee:
+        'Повідомлення поки що не мають наскрізного шифрування. Перевіривши коди безпеки зараз, ви дізнаєтеся, якщо ключі контакту колись зміняться.',
+      explain:
+        'Порівняйте ці цифри з {name} особисто або під час дзвінка. Якщо вони збігаються, ніхто не підмінив ключі між вами.',
+      verified: 'Перевірено',
+      markVerified: 'Позначити як перевірений',
+      unmarkVerified: 'Зняти позначку',
+      keyChanged:
+        'Код безпеки {name} змінився. Зазвичай це означає, що застосунок перевстановили або скинули шифрування, але це також може означати перехоплення. Перевірте код ще раз, перш ніж довіряти.',
+      acceptChange: 'Прийняти новий код безпеки',
+      noKeys: '{name} ще не налаштував(-ла) ключі шифрування.',
+      rejectedDevices: 'Пристроїв, що не пройшли перевірку підпису: {count}. Їх буде проігноровано.',
+      loadFailed: 'Не вдалося завантажити ключі шифрування.',
+      statusReady: 'Ключі шифрування налаштовано на цьому пристрої.',
+      statusWorking: 'Налаштування ключів шифрування…',
+      statusNeedsLink:
+        'Ваша ідентичність шифрування зберігається на іншому пристрої. Зв’язування пристроїв з’явиться незабаром, а поки що її можна скинути тут.',
+      statusError: 'Не вдалося налаштувати ключі шифрування. Спробуємо ще раз автоматично.',
+      resetTitle: 'Скинути ідентичність шифрування',
+      resetWarning:
+        'Буде створено нову ідентичність на цьому пристрої, а ключі інших ваших пристроїв буде відкликано. Ваші контакти побачать, що ваш код безпеки змінився.',
+      resetConfirm: 'Скинути',
+      resetFailed: 'Не вдалося скинути ідентичність шифрування.'
     },
     api: {
       requestFailed: 'Запит не вдався',

@@ -1,4 +1,4 @@
-import { createApp } from 'vue';
+import { createApp, watch } from 'vue';
 import { createPinia } from 'pinia';
 import { IonicVue, toastController } from '@ionic/vue';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -18,6 +18,7 @@ import './theme/variables.css';
 import App from './App.vue';
 import router from './router';
 import { useAuthStore } from './stores/auth';
+import { useE2eeStore } from './stores/e2ee';
 import { useMessagesStore } from './stores/messages';
 import { useSocketStore } from './stores/socket';
 import { i18n, translate } from './i18n';
@@ -39,6 +40,16 @@ if (SENTRY_DSN) {
 }
 
 useAuthStore(pinia).listenForTokenRefresh();
+
+// Provision this device's E2EE keys whenever a user is signed in. Runs in the
+// background and never blocks the UI; failures are reported, not thrown.
+watch(
+  () => useAuthStore(pinia).user?.id,
+  (userId) => {
+    if (userId) void useE2eeStore(pinia).ensure();
+  },
+  { immediate: true }
+);
 
 function resumeDelivery() {
   const auth = useAuthStore(pinia);

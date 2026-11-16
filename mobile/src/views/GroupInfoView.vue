@@ -59,6 +59,13 @@
         <UserSearchList @toggle="addMember" />
       </div>
 
+      <h3 class="section">{{ t('e2ee.title') }}</h3>
+      <ion-list>
+        <ion-item button detail data-testid="open-safety-numbers" @click="router.push(`/chat/${conversationId}/security`)">
+          <ion-label>{{ t('e2ee.openSafetyNumbers') }}</ion-label>
+        </ion-item>
+      </ion-list>
+
       <h3 class="section">{{ t('chat.disappearingTitle') }}</h3>
       <ErrorState v-if="disappearingError" :message="disappearingError" />
       <ion-list>

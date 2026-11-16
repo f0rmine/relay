@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ApiError, apiFetch, markAuthCleared } from '@/api/client';
 import type { TokenResponse, TwoFactorChallenge, User } from '@/api/types';
 import { useBlocksStore } from '@/stores/blocks';
+import { useE2eeStore } from '@/stores/e2ee';
 import { useConversationsStore } from '@/stores/conversations';
 import { useMessagesStore } from '@/stores/messages';
 import { useSocketStore } from '@/stores/socket';
@@ -177,6 +178,7 @@ export const useAuthStore = defineStore('auth', {
       useConversationsStore().reset();
       useMessagesStore().reset();
       useBlocksStore().reset();
+      useE2eeStore().reset();
       this.user = null;
       this.accessToken = null;
       this.refreshToken = null;

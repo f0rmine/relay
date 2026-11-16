@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.auth import PasswordResetToken, RefreshToken
 from app.models.device import DeviceToken
+from app.models.e2ee import E2eeDevice, E2eeIdentity, E2eeOneTimePrekey
 from app.models.user import User
-from app.models.user_device import UserDevice
 from app.services.attachments import sniff_image_type
 from app.services.uploads import read_upload_limited
 
@@ -144,9 +144,16 @@ async def delete_user_account(db: AsyncSession, user: User) -> User:
     user.totp_secret_ciphertext = None
     user.totp_enabled = False
 
+    # Drop the E2EE key directory entry (explicit deletes: SQLite skips FK cascades).
     await db.execute(
-        delete(UserDevice).where(UserDevice.user_id == user.id)
+        delete(E2eeOneTimePrekey).where(
+            E2eeOneTimePrekey.device_pk.in_(
+                select(E2eeDevice.id).where(E2eeDevice.user_id == user.id)
+            )
+        )
     )
+    await db.execute(delete(E2eeDevice).where(E2eeDevice.user_id == user.id))
+    await db.execute(delete(E2eeIdentity).where(E2eeIdentity.user_id == user.id))
     await db.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
 
     refresh_rows = (

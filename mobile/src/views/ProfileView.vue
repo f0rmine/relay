@@ -159,6 +159,48 @@
         <ion-button expand="block" fill="clear" @click="finishRecovery">{{ t('profile.twoFactor.done') }}</ion-button>
       </template>
 
+      <h3 class="section">{{ t('e2ee.title') }}</h3>
+      <p class="muted hint" data-testid="e2ee-status">{{ e2eeStatusText }}</p>
+      <ErrorState v-if="e2eeResetError" :message="e2eeResetError" />
+      <template v-if="e2ee.status === 'needs-link' || e2ee.status === 'ready'">
+        <ion-button
+          v-if="!e2eeResetVisible"
+          expand="block"
+          class="action"
+          fill="outline"
+          :color="e2ee.status === 'needs-link' ? 'primary' : 'medium'"
+          @click="e2eeResetVisible = true"
+        >
+          {{ t('e2ee.resetTitle') }}
+        </ion-button>
+        <div v-else>
+          <p class="muted hint">{{ t('e2ee.resetWarning') }}</p>
+          <ion-list class="profile-list">
+            <ion-item>
+              <ion-input
+                v-model="e2eeResetPassword"
+                type="password"
+                :label="t('common.password')"
+                label-placement="stacked"
+                autocomplete="current-password"
+              />
+            </ion-item>
+          </ion-list>
+          <ion-button
+            expand="block"
+            class="action"
+            color="danger"
+            :disabled="e2eeResetBusy || !e2eeResetPassword"
+            @click="resetE2ee"
+          >
+            {{ t('e2ee.resetConfirm') }}
+          </ion-button>
+          <ion-button expand="block" fill="clear" :disabled="e2eeResetBusy" @click="e2eeResetVisible = false; e2eeResetPassword = ''">
+            {{ t('common.cancel') }}
+          </ion-button>
+        </div>
+      </template>
+
       <h3 class="section danger-title">{{ t('profile.deleteAccount.title') }}</h3>
       <ErrorState v-if="deleteError" :message="deleteError" />
       <p class="muted hint">{{ t('profile.deleteAccount.warning') }}</p>
@@ -210,12 +252,44 @@ import ErrorState from '@/components/ErrorState.vue';
 import Avatar from '@/components/users/Avatar.vue';
 import LanguageSelector from '@/components/LanguageSelector.vue';
 import { useAuthStore } from '@/stores/auth';
+import { useE2eeStore } from '@/stores/e2ee';
 import { useBlocksStore } from '@/stores/blocks';
 import { applyTheme, currentTheme, setTheme, type ThemeName } from '@/services/theme';
 import { decodeJwtPayload } from '@/services/jwt';
 import { reportError } from '@/services/errors';
 
 const auth = useAuthStore();
+const e2ee = useE2eeStore();
+const e2eeResetVisible = ref(false);
+const e2eeResetPassword = ref('');
+const e2eeResetBusy = ref(false);
+const e2eeResetError = ref('');
+const e2eeStatusText = computed(() => {
+  switch (e2ee.status) {
+    case 'ready':
+      return t('e2ee.statusReady');
+    case 'needs-link':
+      return t('e2ee.statusNeedsLink');
+    case 'error':
+      return t('e2ee.statusError');
+    default:
+      return t('e2ee.statusWorking');
+  }
+});
+
+async function resetE2ee() {
+  e2eeResetBusy.value = true;
+  e2eeResetError.value = '';
+  try {
+    await e2ee.resetIdentity(e2eeResetPassword.value);
+    e2eeResetPassword.value = '';
+    e2eeResetVisible.value = false;
+  } catch (err: unknown) {
+    e2eeResetError.value = displayError(err, t('e2ee.resetFailed'));
+  } finally {
+    e2eeResetBusy.value = false;
+  }
+}
 const blocks = useBlocksStore();
 const router = useRouter();
 const displayName = ref('');
