@@ -3,6 +3,7 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { apiFetch } from '@/api/client';
 import { openConversation } from '@/services/navigation';
 import { currentLocale, translate } from '@/i18n';
+import { reportError } from '@/services/errors';
 
 let initialized = false;
 let currentToken: string | null = null;
@@ -16,7 +17,7 @@ async function createMessageChannel(): Promise<void> {
     importance: 4,
     visibility: 1,
     vibration: true
-  }).catch(() => undefined);
+  }).catch((error: unknown) => reportError('push.createChannel', error));
 }
 
 window.addEventListener('relay:locale-changed', () => {
@@ -34,7 +35,7 @@ async function registerDeviceToken(token: string): Promise<void> {
       platform: Capacitor.getPlatform(),
       locale: currentLocale()
     })
-  }).catch(() => undefined);
+  }).catch((error: unknown) => reportError('push.registerToken', error));
 }
 
 export async function initPushNotifications(): Promise<void> {
@@ -64,7 +65,7 @@ export async function initPushNotifications(): Promise<void> {
     if (!registering) {
       registering = true;
       await PushNotifications.register()
-        .catch(() => undefined)
+        .catch((error: unknown) => reportError('push.register', error))
         .finally(() => {
           registering = false;
         });

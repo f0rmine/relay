@@ -98,7 +98,8 @@ async def refresh_presence(redis, user_id: str, instance_id: str) -> None:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     redis = await get_redis()
-    client_ip = websocket.client.host if getattr(websocket, "client", None) else "unknown"
+    client = getattr(websocket, "client", None)
+    client_ip = client.host if client else "unknown"
     if not await consume_ws_auth_allowance(client_ip):
         await send_error(websocket, "Too many connection attempts")
         await websocket.close(code=1008)
@@ -205,26 +206,26 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         return
 
     if envelope.type == "typing:start":
-        payload = TypingPayload.model_validate(envelope.payload)
-        conversation = await require_participant(db, payload.conversation_id, user.id)
-        await set_typing(redis, payload.conversation_id, user.id)
+        typing_payload = TypingPayload.model_validate(envelope.payload)
+        conversation = await require_participant(db, typing_payload.conversation_id, user.id)
+        await set_typing(redis, typing_payload.conversation_id, user.id)
         await manager.broadcast_to_users(
             redis,
             await conversation_participant_ids(conversation),
             "typing:update",
-            {"conversation_id": payload.conversation_id, "user_id": user.id, "is_typing": True},
+            {"conversation_id": typing_payload.conversation_id, "user_id": user.id, "is_typing": True},
         )
         return
 
     if envelope.type == "typing:stop":
-        payload = TypingPayload.model_validate(envelope.payload)
-        conversation = await require_participant(db, payload.conversation_id, user.id)
-        await clear_typing(redis, payload.conversation_id, user.id)
+        typing_payload = TypingPayload.model_validate(envelope.payload)
+        conversation = await require_participant(db, typing_payload.conversation_id, user.id)
+        await clear_typing(redis, typing_payload.conversation_id, user.id)
         await manager.broadcast_to_users(
             redis,
             await conversation_participant_ids(conversation),
             "typing:update",
-            {"conversation_id": payload.conversation_id, "user_id": user.id, "is_typing": False},
+            {"conversation_id": typing_payload.conversation_id, "user_id": user.id, "is_typing": False},
         )
         return
 
@@ -232,30 +233,30 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         if not await consume_message_allowance(user.id):
             await send_error(websocket, "Too many messages", envelope.request_id)
             return
-        payload = MessageSendPayload.model_validate(envelope.payload)
-        client_message_id = payload.client_message_id or envelope.request_id or str(uuid4())
+        send_payload = MessageSendPayload.model_validate(envelope.payload)
+        client_message_id = send_payload.client_message_id or envelope.request_id or str(uuid4())
         message, created = await create_message_idempotent(
             db,
             user,
-            payload.conversation_id,
+            send_payload.conversation_id,
             client_message_id,
-            payload.text,
-            payload.attachment_ids,
-            reply_to_id=payload.reply_to_id,
+            send_payload.text,
+            send_payload.attachment_ids,
+            reply_to_id=send_payload.reply_to_id,
         )
         message_payload = serialize_message(message)
         message_payload["request_id"] = client_message_id
         if not created:
             await websocket.send_json({"type": "message:new", "payload": message_payload})
             return
-        conversation = await require_participant(db, payload.conversation_id, user.id)
+        conversation = await require_participant(db, send_payload.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
         await manager.broadcast_to_users(redis, participants, "message:new", message_payload)
         await manager.broadcast_to_users(
             redis,
             participants,
             "conversation:updated",
-            {"conversation_id": payload.conversation_id, "latest_message": message_payload},
+            {"conversation_id": send_payload.conversation_id, "latest_message": message_payload},
         )
         push_recipient_ids = [
             participant_id
@@ -266,8 +267,8 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         return
 
     if envelope.type == "message:delete":
-        payload = MessageDeletePayload.model_validate(envelope.payload)
-        message = await delete_message_for_everyone(db, payload.message_id, user)
+        delete_payload = MessageDeletePayload.model_validate(envelope.payload)
+        message = await delete_message_for_everyone(db, delete_payload.message_id, user)
         conversation = await require_participant(db, message.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
         await manager.broadcast_to_users(redis, participants, "message:deleted", serialize_message(message))
@@ -282,8 +283,8 @@ async def handle_event(db, redis, websocket: WebSocket, user: User, envelope: We
         return
 
     if envelope.type == "message:edit":
-        payload = MessageEditPayload.model_validate(envelope.payload)
-        message = await edit_message(db, payload.message_id, user, payload.text)
+        edit_payload = MessageEditPayload.model_validate(envelope.payload)
+        message = await edit_message(db, edit_payload.message_id, user, edit_payload.text)
         conversation = await require_participant(db, message.conversation_id, user.id)
         participants = await conversation_participant_ids(conversation)
         message_payload = serialize_message(message)

@@ -77,8 +77,8 @@ def generate_thumbnail(data: bytes, mime_type: str) -> tuple[bytes, int, int] | 
 
         from PIL import Image
 
-        with Image.open(BytesIO(data)) as image:
-            image = image.convert("RGB") if image.mode not in ("RGB", "L") else image
+        with Image.open(BytesIO(data)) as source:
+            image: Image.Image = source.convert("RGB") if source.mode not in ("RGB", "L") else source
             image.thumbnail((THUMB_MAX_DIMENSION, THUMB_MAX_DIMENSION))
             buffer = BytesIO()
             image.save(buffer, format="JPEG", quality=80)
@@ -166,6 +166,8 @@ async def save_upload(db: AsyncSession, user: User, file: UploadFile) -> Attachm
     path = upload_dir / stored_filename
     thumb_info = generate_thumbnail(data, content_type)
     thumb_path: Path | None = None
+    thumb_w: int | None
+    thumb_h: int | None
     if thumb_info is not None:
         thumb_bytes, thumb_w, thumb_h = thumb_info
         encrypted_thumb = get_encryption_keyring().encrypt(
@@ -224,9 +226,10 @@ async def read_attachment_bytes(
     attachment: Attachment, variant: str = "full"
 ) -> bytes:
     use_thumb = variant == "thumb" and attachment.thumb_path is not None
-    path = Path(
-        attachment.thumb_path if use_thumb else (attachment.encrypted_path or attachment.storage_path)
-    )
+    if use_thumb and attachment.thumb_path is not None:
+        path = Path(attachment.thumb_path)
+    else:
+        path = Path(attachment.encrypted_path or attachment.storage_path)
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File missing from storage")
     async with aiofiles.open(path, "rb") as stored_file:

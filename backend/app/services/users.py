@@ -156,8 +156,8 @@ async def delete_user_account(db: AsyncSession, user: User) -> User:
             )
         )
     ).all()
-    for row in refresh_rows:
-        row.revoked_at = now
+    for refresh_row in refresh_rows:
+        refresh_row.revoked_at = now
 
     reset_rows = (
         await db.scalars(
@@ -167,14 +167,14 @@ async def delete_user_account(db: AsyncSession, user: User) -> User:
             )
         )
     ).all()
-    for row in reset_rows:
-        row.used_at = now
+    for reset_row in reset_rows:
+        reset_row.used_at = now
 
     device_rows = (
         await db.scalars(select(DeviceToken).where(DeviceToken.user_id == user.id))
     ).all()
-    for row in device_rows:
-        row.enabled = False
+    for device_row in device_rows:
+        device_row.enabled = False
 
     await db.commit()
     await db.refresh(user)

@@ -64,6 +64,7 @@ import { apiUrl } from '@/config/env';
 import { refreshTokens } from '@/api/client';
 import { getAccessToken } from '@/services/auth-storage';
 import type { Attachment } from '@/api/types';
+import { reportError } from '@/services/errors';
 
 const props = defineProps<{ attachment: Attachment }>();
 const { t } = useI18n();
@@ -191,9 +192,10 @@ async function startDownload() {
     ownsObjectUrl = true;
     videoUrl.value = url;
     state.value = 'ready';
-  } catch {
+  } catch (err: unknown) {
     if (sequence !== downloadSequence) return;
     if (signal.aborted) return;
+    reportError('video.download', err);
     failed.value = true;
     state.value = 'idle';
     clearObjectUrl();

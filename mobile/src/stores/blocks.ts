@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { apiFetch } from '@/api/client';
 import type { User } from '@/api/types';
+import { reportError } from '@/services/errors';
 
 interface BlockState {
   blocked: User[];
@@ -24,8 +25,9 @@ export const useBlocksStore = defineStore('blocks', {
       // refetch must not mask the successful block.
       try {
         await this.fetchBlocked();
-      } catch {
+      } catch (error) {
         // Keep the previous list; next fetch will resync.
+        reportError('blocks.refetch', error);
       }
     },
     async unblock(userId: string): Promise<void> {

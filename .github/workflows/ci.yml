@@ -58,6 +58,9 @@ jobs:
       - name: Run Ruff
         working-directory: backend
         run: ruff check app
+      - name: Run mypy
+        working-directory: backend
+        run: mypy app
 
   mobile:
     name: Mobile tests and build

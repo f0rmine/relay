@@ -211,9 +211,9 @@ async def create_message(
             attachment.message_id = message.id
     from app.models.conversation import Conversation
 
-    conversation = await db.get(Conversation, conversation_id)
-    if conversation:
-        conversation.updated_at = datetime.now(UTC)
+    touched = await db.get(Conversation, conversation_id)
+    if touched:
+        touched.updated_at = datetime.now(UTC)
     await db.commit()
     created = (
         await db.scalars(
@@ -467,12 +467,12 @@ async def search_user_messages(
     query: str,
     limit: int = 20,
     per_conversation_scan: int = 500,
-) -> list[dict]:
+) -> list[Message]:
     from app.services.conversations import list_conversations
 
     needle = query.lower().strip()
     conversations = await list_conversations(db, user.id)
-    matches: list[dict] = []
+    matches: list[Message] = []
     now = datetime.now(UTC)
     for conversation in conversations:
         candidates = (

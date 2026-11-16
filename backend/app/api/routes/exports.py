@@ -47,7 +47,8 @@ async def create_export(
     except Exception:
         logger.exception("Immediate export processing failed")
     refreshed = await db.get(ExportJob, job.id)
-    assert refreshed is not None
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
     return _serialize(refreshed)
 
 

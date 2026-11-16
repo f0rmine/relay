@@ -103,7 +103,10 @@ async def push_queue_worker() -> None:
             item = await redis.blpop(PUSH_QUEUE_KEY, timeout=5)
             if item is None:
                 continue
-            raw = item[1] if isinstance(item, tuple) else item
+            raw = item[1] if isinstance(item, (tuple, list)) else item
+            if not isinstance(raw, (str, bytes)):
+                logger.warning("Discarding malformed push queue entry")
+                continue
             try:
                 job = json.loads(raw)
             except (json.JSONDecodeError, TypeError):

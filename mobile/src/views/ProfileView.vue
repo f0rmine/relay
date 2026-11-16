@@ -213,6 +213,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useBlocksStore } from '@/stores/blocks';
 import { applyTheme, currentTheme, setTheme, type ThemeName } from '@/services/theme';
 import { decodeJwtPayload } from '@/services/jwt';
+import { reportError } from '@/services/errors';
 
 const auth = useAuthStore();
 const blocks = useBlocksStore();
@@ -278,7 +279,8 @@ async function refreshMe() {
     await auth.setUser({ ...me, totp_enabled: me.totp_enabled ?? auth.user?.totp_enabled });
     displayName.value = me.display_name || displayName.value;
     email.value = me.email || email.value;
-  } catch {
+  } catch (err: unknown) {
+    reportError('profile.refreshMe', err);
     // Keep the cached user when the backend is unreachable or 2FA fields are absent.
   }
 }
@@ -300,7 +302,8 @@ async function loadSessions() {
     sessions.value = await apiFetch<SessionInfo[]>(
       `/auth/sessions${jti ? `?current_jti=${encodeURIComponent(jti)}` : ''}`
     );
-  } catch {
+  } catch (err: unknown) {
+    reportError('profile.loadSessions', err);
     sessions.value = [];
   }
 }

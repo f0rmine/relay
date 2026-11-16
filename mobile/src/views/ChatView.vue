@@ -73,6 +73,7 @@ import { useSocketStore } from '@/stores/socket';
 import { clearLocalConversationNotifications } from '@/services/notifications';
 import { clearPushConversationNotifications } from '@/services/push';
 import { loadDraft, clearDraft, saveDraft } from '@/services/drafts';
+import { reportError } from '@/services/errors';
 
 const route = useRoute();
 const conversationId = computed(() => String(route.params.id));
@@ -292,8 +293,9 @@ async function forwardTo(target: Conversation) {
         const blob = await apiBlob(`/attachments/${attachment.id}/download`);
         const file = new File([blob], attachment.original_filename, { type: attachment.mime_type });
         await messages.enqueue(target.id, '', file, null);
-      } catch {
+      } catch (err: unknown) {
         // skip attachments that fail to download
+        reportError('forward.attachment', err);
       }
     }
   } catch (err: unknown) {
